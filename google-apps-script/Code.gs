@@ -1,22 +1,92 @@
 /**
- * TrailTimer - Google Apps Script Backend
+ * TrailTimer - Google Apps Script Backend (v1.2)
  * Web App endpoint to receive offline-first timing logs and participant data directly into Google Sheets.
  * 
- * CARA DEPLOY:
- * 1. Buat Google Spreadsheet baru (misal: "Hasil Trail Running Merbabu 2026").
+ * CARA MENGGUNAKAN & MEMPERBAIKI TAMPILAN HEADER:
+ * 1. Buka spreadsheet Google Sheets Anda ("Timer").
  * 2. Klik menu 'Extensions' (Ekstensi) > 'Apps Script'.
- * 3. Hapus kode default, paste seluruh isi file ini ke 'Code.gs'.
- * 4. Klik tombol 'Save' (ikon disket).
- * 5. Klik tombol biru 'Deploy' di kanan atas > 'New deployment' (Penyebaran baru).
- * 6. Pilih type 'Web app' (ikon gerigi).
- * 7. Atur:
- *    - Description: "TrailTimer API v1"
- *    - Execute as: "Me" (email Anda)
- *    - Who has access: "Anyone" (Siapa saja - penting agar PWA bisa mengirim tanpa login akun Google)
- * 8. Klik 'Deploy'. Berikan izin otorisasi jika diminta oleh Google.
- * 9. Salin "Web app URL" (akhiran /exec) dan paste ke menu 'Pengaturan & Sync' di aplikasi TrailTimer.
+ * 3. Hapus seluruh isi lama di 'Code.gs', lalu paste seluruh kode ini.
+ * 4. Klik ikon 'Save' (Disket).
+ * 5. CARA INSTAN MENAMPILKAN KEMBALI HEADER:
+ *    - Di bar atas Apps Script, pilih fungsi 'perbaikiDanTampilkanHeader' dari dropdown.
+ *    - Klik tombol 'Run' (Jalankan).
+ *    - Buka tab Google Sheets Anda: seluruh judul kolom (Header) di sheet 'Peserta' dan 'Timing_Logs'
+ *      akan langsung muncul kembali dengan warna kontras dan teks putih tebal!
+ *    - Format '12/31/1899' di kolom No. juga otomatis berubah menjadi angka 1, 2, dst.
+ * 6. Klik tombol biru 'Deploy' di kanan atas > 'Manage deployments' > Ikon pensil > Version: 'New version' > 'Deploy'.
  */
 
+// ==========================================
+// 1. MENU OTOMATIS DI GOOGLE SHEETS
+// ==========================================
+function onOpen() {
+  try {
+    var ui = SpreadsheetApp.getUi();
+    ui.createMenu('🏃 TrailTimer')
+      .addItem('🛠️ Tampilkan & Perbaiki Header', 'perbaikiDanTampilkanHeader')
+      .addItem('🔢 Rapikan Nomor Urut & Format Kolom', 'rapikanNomorDanFormat')
+      .addToUi();
+  } catch (e) {
+    // Non-UI context
+  }
+}
+
+/**
+ * Menulis ulang header Baris 1 secara lengkap & merapikan format tampilan seketika
+ */
+function perbaikiDanTampilkanHeader() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  initSpreadsheetStructure(ss);
+  rapikanNomorDanFormat();
+  
+  try {
+    SpreadsheetApp.getActiveSpreadsheet().toast('Header dan format sheet berhasil diperbarui dan ditampilkan kembali!', 'TrailTimer', 5);
+  } catch (e) {}
+}
+
+/**
+ * Merapikan nomor urut baris dan memastikan kolom No. berformat angka '0' (bukan tanggal 1899)
+ */
+function rapikanNomorDanFormat() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1. Rapikan sheet Peserta
+  var sheetPeserta = ss.getSheetByName('Peserta');
+  if (sheetPeserta && sheetPeserta.getLastRow() > 1) {
+    var lastRowP = sheetPeserta.getLastRow();
+    sheetPeserta.getRange(2, 1, lastRowP - 1, 1).setNumberFormat('0');
+    var numsP = [];
+    for (var p = 1; p <= lastRowP - 1; p++) numsP.push([p]);
+    sheetPeserta.getRange(2, 1, lastRowP - 1, 1).setValues(numsP);
+    sheetPeserta.getRange(2, 2, lastRowP - 1, 1).setNumberFormat('@'); // Kolom BIB sebagai teks
+  }
+
+  // 2. Rapikan sheet Timing_Logs
+  var sheetLogs = ss.getSheetByName('Timing_Logs');
+  if (sheetLogs && sheetLogs.getLastRow() > 1) {
+    var lastRowL = sheetLogs.getLastRow();
+    sheetLogs.getRange(2, 1, lastRowL - 1, 1).setNumberFormat('0');
+    var numsL = [];
+    for (var l = 1; l <= lastRowL - 1; l++) numsL.push([l]);
+    sheetLogs.getRange(2, 1, lastRowL - 1, 1).setValues(numsL);
+
+    // Otomatis koreksi jika ada data baris yang tergeser (misal Kolom F kosong tapi Kolom G berisi angka BIB)
+    for (var r = 2; r <= lastRowL; r++) {
+      var valF = String(sheetLogs.getRange(r, 6).getValue() || '').trim();
+      var valG = String(sheetLogs.getRange(r, 7).getValue() || '').trim();
+      if (valF === '' && valG !== '') {
+        // Kolom F kosong tapi Kolom G ada nilai -> geser Kolom G..O ke kiri menjadi Kolom F..N
+        var rowData = sheetLogs.getRange(r, 7, 1, 9).getValues();
+        sheetLogs.getRange(r, 6, 1, 9).setValues(rowData);
+        sheetLogs.getRange(r, 16).clearContent();
+      }
+    }
+  }
+}
+
+// ==========================================
+// 2. HTTP GET: CLOUD PULL DATA PESERTA
+// ==========================================
 function doGet(e) {
   var action = e && e.parameter ? e.parameter.action : '';
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -111,12 +181,15 @@ function doGet(e) {
   return ContentService.createTextOutput(JSON.stringify({
     status: 'success',
     app: 'TrailTimer Google Apps Script Backend',
-    version: '1.1',
+    version: '1.2',
     timestamp: new Date().toISOString(),
     message: 'Backend siap menerima dan mengirim data catatan waktu lomba lari!'
   })).setMimeType(ContentService.MimeType.JSON);
 }
 
+// ==========================================
+// 3. HTTP POST: MENERIMA TIMING LOGS DARI PWA
+// ==========================================
 function doPost(e) {
   var lock = LockService.getScriptLock();
   // Lock 30 detik untuk menghindari race condition jika banyak pos sync bersamaan
@@ -169,89 +242,93 @@ function doPost(e) {
   }
 }
 
-/**
- * Inisialisasi sheet dan header jika belum ada (dengan Kolom 'No.' di paling kiri)
- */
+// ==========================================
+// 4. STRUKTUR & INISIALISASI HEADER SHEET
+// ==========================================
 function initSpreadsheetStructure(ss) {
   // 1. Sheet Timing_Logs
   var sheetLogs = ss.getSheetByName('Timing_Logs');
+  var logHeaders = [
+    'No.',
+    'Server Time',
+    'Device Timestamp',
+    'Device ID',
+    'Station / Pos',
+    'BIB',
+    'Nama Peserta',
+    'Kategori',
+    'Aksi',
+    'Checkpoint',
+    'Split Time',
+    'Elapsed Time',
+    'Pace',
+    'Kecepatan (km/h)',
+    'Log ID'
+  ];
+
   if (!sheetLogs) {
     sheetLogs = ss.insertSheet('Timing_Logs');
-    sheetLogs.appendRow([
-      'No.',
-      'Server Time',
-      'Device Timestamp',
-      'Device ID',
-      'Station / Pos',
-      'BIB',
-      'Nama Peserta',
-      'Kategori',
-      'Aksi',
-      'Checkpoint',
-      'Split Time',
-      'Elapsed Time',
-      'Pace',
-      'Kecepatan (km/h)',
-      'Log ID'
-    ]);
-    sheetLogs.getRange(1, 1, 1, 15).setFontWeight('bold').setBackground('#0f766e').setFontColor('#ffffff');
-    sheetLogs.setFrozenRows(1);
-    sheetLogs.getRange('A:A').setNumberFormat('0');
-  } else {
-    // Migrasi otomatis jika sheet sudah ada tapi belum ada kolom 'No.'
-    if (sheetLogs.getRange(1, 1).getValue().toString().toLowerCase() !== 'no.') {
-      sheetLogs.insertColumnBefore(1);
-      sheetLogs.getRange(1, 1).setValue('No.').setFontWeight('bold').setBackground('#0f766e').setFontColor('#ffffff');
-      var numRows = sheetLogs.getLastRow() - 1;
-      if (numRows > 0) {
-        var numbers = [];
-        for (var n = 1; n <= numRows; n++) numbers.push([n]);
-        sheetLogs.getRange(2, 1, numRows, 1).setValues(numbers);
-      }
-    }
-    sheetLogs.getRange('A:A').setNumberFormat('0');
   }
+
+  // Periksa apakah kolom pertama adalah 'No.'
+  var firstCellLogs = sheetLogs.getRange(1, 1).getValue().toString().trim().toLowerCase();
+  if (firstCellLogs !== 'no.' && (firstCellLogs.includes('server') || firstCellLogs.includes('time') || firstCellLogs.includes('1899'))) {
+    sheetLogs.insertColumnBefore(1);
+  }
+
+  // SELALU tulis dan pastikan header lengkap di Baris 1
+  sheetLogs.getRange(1, 1, 1, logHeaders.length)
+    .setValues([logHeaders])
+    .setFontWeight('bold')
+    .setBackground('#0f766e')
+    .setFontColor('#ffffff')
+    .setHorizontalAlignment('center');
+  
+  sheetLogs.setFrozenRows(1);
+  sheetLogs.getRange('A:A').setNumberFormat('0');
 
   // 2. Sheet Peserta (Master & Real-time Progress)
   var sheetPeserta = ss.getSheetByName('Peserta');
+  var pesertaHeaders = [
+    'No.',
+    'BIB',
+    'Nama Peserta',
+    'Kategori',
+    'Status Terkini',
+    'Pos Terakhir',
+    'Waktu Split Terakhir',
+    'Total Waktu Tempuh',
+    'Avg Pace',
+    'Avg Speed (km/h)',
+    'Start Timestamp',
+    'Terakhir Diperbarui'
+  ];
+
   if (!sheetPeserta) {
     sheetPeserta = ss.insertSheet('Peserta');
-    sheetPeserta.appendRow([
-      'No.',
-      'BIB',
-      'Nama Peserta',
-      'Kategori',
-      'Status Terkini',
-      'Pos Terakhir',
-      'Waktu Split Terakhir',
-      'Total Waktu Tempuh',
-      'Avg Pace',
-      'Avg Speed (km/h)',
-      'Start Timestamp',
-      'Terakhir Diperbarui'
-    ]);
-    sheetPeserta.getRange(1, 1, 1, 12).setFontWeight('bold').setBackground('#1e293b').setFontColor('#ffffff');
-    sheetPeserta.setFrozenRows(1);
-    sheetPeserta.getRange('A:A').setNumberFormat('0');
-  } else {
-    // Migrasi otomatis jika sheet sudah ada tapi belum ada kolom 'No.'
-    if (sheetPeserta.getRange(1, 1).getValue().toString().toLowerCase() !== 'no.') {
-      sheetPeserta.insertColumnBefore(1);
-      sheetPeserta.getRange(1, 1).setValue('No.').setFontWeight('bold').setBackground('#1e293b').setFontColor('#ffffff');
-      var numRowsPeserta = sheetPeserta.getLastRow() - 1;
-      if (numRowsPeserta > 0) {
-        var numbersPeserta = [];
-        for (var np = 1; np <= numRowsPeserta; np++) numbersPeserta.push([np]);
-        sheetPeserta.getRange(2, 1, numRowsPeserta, 1).setValues(numbersPeserta);
-      }
-    }
-    sheetPeserta.getRange('A:A').setNumberFormat('0');
   }
+
+  var firstCellPeserta = sheetPeserta.getRange(1, 1).getValue().toString().trim().toLowerCase();
+  if (firstCellPeserta !== 'no.' && firstCellPeserta.includes('bib')) {
+    sheetPeserta.insertColumnBefore(1);
+  }
+
+  // SELALU tulis dan pastikan header lengkap di Baris 1
+  sheetPeserta.getRange(1, 1, 1, pesertaHeaders.length)
+    .setValues([pesertaHeaders])
+    .setFontWeight('bold')
+    .setBackground('#1e293b')
+    .setFontColor('#ffffff')
+    .setHorizontalAlignment('center');
+
+  sheetPeserta.setFrozenRows(1);
+  sheetPeserta.getRange('A:A').setNumberFormat('0');
+  sheetPeserta.getRange('B:B').setNumberFormat('@');
 }
 
-/**
- * Proses batch log dari PWA
- */
+// ==========================================
+// 5. PROSES BATCH LOG DARI PWA
+// ==========================================
 function processBatchLogs(ss, data) {
   var sheetLogs = ss.getSheetByName('Timing_Logs');
   var sheetPeserta = ss.getSheetByName('Peserta');
@@ -334,6 +411,7 @@ function processBatchLogs(ss, data) {
   // Batch append ke Timing_Logs
   if (logRows.length > 0) {
     sheetLogs.getRange(sheetLogs.getLastRow() + 1, 1, logRows.length, logRows[0].length).setValues(logRows);
+    sheetLogs.getRange(2, 1, sheetLogs.getLastRow() - 1, 1).setNumberFormat('0');
   }
 
   // Update sheet Peserta
@@ -342,9 +420,9 @@ function processBatchLogs(ss, data) {
   return logs.length;
 }
 
-/**
- * Update data ringkasan peserta di sheet Peserta (dengan kolom No. di Kolom A & Start Timestamp di Kolom K)
- */
+// ==========================================
+// 6. UPDATE DATA RINGKASAN SHEET PESERTA
+// ==========================================
 function updatePesertaSheet(sheet, updates) {
   var lastRow = sheet.getLastRow();
   var bibMap = {};
@@ -378,7 +456,7 @@ function updatePesertaSheet(sheet, updates) {
 
     if (bibMap[bib]) {
       var rowIdx = bibMap[bib];
-      // Jika baris lama sudah punya startTimestamp tapi update saat ini tidak membawa startTimestamp (misal punch CP), pertahankan startTimestamp yang lama!
+      // Jika baris lama sudah punya startTimestamp tapi update saat ini tidak membawa startTimestamp, pertahankan yang lama
       if (!u.startTimestamp) {
         var oldStartTs = sheet.getRange(rowIdx, 11).getValue(); // Col K
         if (oldStartTs) {
@@ -393,11 +471,16 @@ function updatePesertaSheet(sheet, updates) {
       bibMap[bib] = sheet.getLastRow();
     }
   }
+
+  if (sheet.getLastRow() > 1) {
+    sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).setNumberFormat('0');
+    sheet.getRange(2, 2, sheet.getLastRow() - 1, 1).setNumberFormat('@');
+  }
 }
 
-/**
- * Format MS to HH:MM:SS
- */
+// ==========================================
+// 7. FORMATTER HELPER
+// ==========================================
 function formatElapsedGAS(ms) {
   if (ms === null || ms === undefined || isNaN(ms) || ms < 0) return '-';
   var totalSec = Math.floor(ms / 1000);
@@ -408,4 +491,3 @@ function formatElapsedGAS(ms) {
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   return pad(hours) + ':' + pad(minutes) + ':' + pad(seconds);
 }
-
