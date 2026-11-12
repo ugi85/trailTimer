@@ -60,20 +60,41 @@ Ketika panitia mendapatkan sinyal (baik di puncak bukit, pos tertentu, atau sete
 
 ### 1. Sheet `Timing_Logs` (Semua Log Waktu Mentah)
 Mencatat setiap kali tombol Start, Checkpoint, atau Finish ditekan oleh panitia di pos manapun:
+- **No.**: Nomor urut pencatatan waktu (otomatis).
 - **Server Time**: Waktu penerimaan di server.
 - **Device Timestamp**: Waktu persis saat tombol ditekan di HP panitia (akurat meskipun baru disinkronkan berjam-jam kemudian).
 - **Device ID & Station**: Identitas HP dan nama pos pencatat.
 - **BIB & Nama**: Nomor dada dan nama pelari.
+- **Kategori**: Kategori lomba (misal 21K Trail).
 - **Aksi & Checkpoint**: START, CP 1, CP 2, FINISH, DNF.
 - **Split Time & Elapsed Time**: Waktu per segmen & total waktu berjalan.
 - **Pace & Speed**: Pace (menit/km) dan kecepatan (km/jam).
+- **Log ID**: ID unik sinkronisasi perangkat.
 
 ### 2. Sheet `Peserta` (Master Status Terkini)
-Menampilkan rangkuman real-time setiap peserta:
-- BIB, Nama, Kategori
-- Status Terkini (Belum Start / Berlari / Finish / DNF)
-- Pos Terakhir yang dilewati
-- Total Waktu Tempuh & Rata-rata Kecepatan
+Menampilkan rangkuman real-time setiap peserta lengkap dengan nomor urut:
+- **No.**: Nomor urut peserta (1, 2, 3... untuk mengetahui total peserta dengan mudah).
+- **BIB**: Nomor dada pelari.
+- **Nama Peserta**: Nama lengkap pelari.
+- **Kategori**: Kategori lomba.
+- **Status Terkini**: Belum Start / Berlari / Finish / DNF.
+- **Pos Terakhir**: Pos terakhir yang berhasil dilewati.
+- **Waktu Split Terakhir**: Waktu tempuh segmen terakhir.
+- **Total Waktu Tempuh**: Akumulasi total waktu tempuh (*Gun Time*).
+- **Avg Pace**: Rata-rata *pace* (menit/km).
+- **Avg Speed (km/h)**: Rata-rata kecepatan (km/jam).
+- **Terakhir Diperbarui**: Timestamp pembaruan data terakhir.
+
+---
+
+## 🔄 Cara Memperbarui Kode di Google Sheets yang Sudah Ada:
+1. Buka spreadsheet Google Anda.
+2. Klik **Extensions** > **Apps Script**.
+3. Ganti kode lama dengan seluruh isi dari file [`Code.gs`](./Code.gs) yang terbaru.
+4. Klik tombol **Deploy** > **Manage deployments** (Kelola penyebaran).
+5. Klik ikon **Edit** (pensil), pilih Version: **New version** (Versi baru).
+6. Klik **Deploy**. Selesai!
+*(Script otomatis memigrasikan sheet lama Anda dan menyisipkan kolom **No.** di paling kiri tanpa merusak data yang sudah ada).*
 
 ---
 

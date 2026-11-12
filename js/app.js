@@ -159,12 +159,21 @@ function initSyncEngine() {
     onStatusChange: (isOnline) => {
       updateNetworkBadge(isOnline);
     },
-    onSyncComplete: ({ success, count, isManual }) => {
+    onSyncComplete: async ({ success, count, pullCount, isManual }) => {
       updateSyncBadge();
       renderSyncQueue();
-      if (success && count > 0) {
-        showToast(`Berhasil mensinkronkan ${count} catatan waktu!`, 'success');
-      } else if (isManual && count === 0) {
+      if (pullCount > 0) {
+        await refreshParticipants();
+      }
+      if (success && (count > 0 || pullCount > 0)) {
+        if (count > 0 && pullCount > 0) {
+          showToast(`Berhasil kirim ${count} log & tarik ${pullCount} peserta!`, 'success');
+        } else if (count > 0) {
+          showToast(`Berhasil mensinkronkan ${count} catatan waktu!`, 'success');
+        } else if (pullCount > 0) {
+          showToast(`Berhasil menarik ${pullCount} peserta dari Google Sheets!`, 'success');
+        }
+      } else if (isManual && count === 0 && (!pullCount || pullCount === 0)) {
         showToast('Semua data sudah tersinkronisasi.', 'info');
       }
     }
@@ -1268,9 +1277,30 @@ function handleCsvFileUpload(e) {
 
   const reader = new FileReader();
   reader.onload = (event) => {
+    const raw = event.target.result;
     const textarea = document.getElementById('importTextArea');
-    if (textarea) {
-      textarea.value = event.target.result;
+    if (!textarea) return;
+
+    // Jika file berformat Excel HTML-table (.xls)
+    if (raw.includes('<table') || raw.includes('<tr')) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(raw, 'text/html');
+      const rows = doc.querySelectorAll('tr');
+      const parsedLines = [];
+
+      rows.forEach(tr => {
+        const cells = tr.querySelectorAll('th, td');
+        const rowVals = [];
+        cells.forEach(c => rowVals.push(c.textContent.trim().replace(/,/g, ' ')));
+        if (rowVals.length >= 2) {
+          parsedLines.push(rowVals.join(', '));
+        }
+      });
+
+      textarea.value = parsedLines.join('\n');
+    } else {
+      // Plain CSV / TXT / TSV
+      textarea.value = raw;
     }
   };
   reader.readAsText(file);
@@ -1464,7 +1494,12 @@ async function handleManualSync() {
   if (btn) btn.classList.remove('loading');
   if (manualBtn) manualBtn.classList.remove('loading');
 
-  if (!result.success) {
+  if (result.success) {
+    if (result.pullCount > 0) {
+      await refreshParticipants();
+    }
+    showToast(result.message, (result.count > 0 || result.pullCount > 0) ? 'success' : 'info');
+  } else {
     showToast(result.message, 'error');
   }
 }
@@ -1876,6 +1911,12 @@ function initEventListeners() {
   // Export Buttons
   const btnExportParts = document.getElementById('btnExportParticipants');
   if (btnExportParts) btnExportParts.addEventListener('click', () => TrailSync.exportParticipantsCSV());
+
+  const btnDownloadTpl = document.getElementById('btnDownloadTemplate');
+  if (btnDownloadTpl) btnDownloadTpl.addEventListener('click', () => TrailSync.downloadParticipantTemplate());
+
+  const btnModalDownloadTpl = document.getElementById('btnModalDownloadTemplate');
+  if (btnModalDownloadTpl) btnModalDownloadTpl.addEventListener('click', () => TrailSync.downloadParticipantTemplate());
 
   const btnExportLb = document.getElementById('btnExportLeaderboard');
   if (btnExportLb) {

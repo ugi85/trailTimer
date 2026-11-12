@@ -101,7 +101,18 @@ class TrailDB {
 
   static async saveParticipant(participant) {
     const db = await this.open();
-    participant.bib = String(participant.bib).trim();
+    let bib = String(participant.bib || '').trim();
+    if (!bib && participant.name) {
+      const match = String(participant.name).match(/^(\d+)\s*(.*)$/);
+      if (match) {
+        bib = match[1];
+        participant.name = match[2];
+      }
+    }
+    if (!bib) {
+      bib = 'runner_' + Date.now();
+    }
+    participant.bib = bib;
     participant.updatedAt = new Date().toISOString();
     return new Promise((resolve, reject) => {
       const tx = db.transaction('participants', 'readwrite');
@@ -118,8 +129,20 @@ class TrailDB {
       const tx = db.transaction('participants', 'readwrite');
       const store = tx.objectStore('participants');
       const now = new Date().toISOString();
-      for (const item of list) {
-        item.bib = String(item.bib).trim();
+      for (let i = 0; i < list.length; i++) {
+        const item = list[i];
+        let bib = String(item.bib || '').trim();
+        if (!bib && item.name) {
+          const match = String(item.name).match(/^(\d+)\s*(.*)$/);
+          if (match) {
+            bib = match[1];
+            item.name = match[2];
+          }
+        }
+        if (!bib) {
+          bib = String(100 + i + 1);
+        }
+        item.bib = bib;
         item.updatedAt = now;
         store.put(item);
       }

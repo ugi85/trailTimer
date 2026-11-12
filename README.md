@@ -28,6 +28,7 @@
 
 3. **Manajemen Peserta & Rute (Setup)**:
    - Form penambahan peserta manual (Nomor Dada / BIB, Nama Lengkap, Kategori, Tim).
+   - **Download Template Excel / CSV**: Tombol instan untuk mengunduh template spreadsheet resmi yang siap diisi dan diimpor.
    - **Import Cepat CSV / Paste Teks**: Mendukung format `BIB, Nama, Kategori, Tim` dengan deteksi duplikat otomatis.
    - **Rute & Checkpoint Builder**: Pengaturan nama pos (Start, CP 1, CP 2, ..., Finish) dan jarak segmen (KM) dengan kalkulasi kumulatif otomatis.
 

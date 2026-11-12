@@ -39,25 +39,59 @@ function doGet(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    var data = sheetPeserta.getRange(2, 1, lastRow - 1, 3).getValues();
+    var isFirstColNo = sheetPeserta.getRange(1, 1).getValue().toString().toLowerCase().includes('no');
+    var startCol = isFirstColNo ? 2 : 1;
+    // Baca hingga kolom Status Terkini (Col B, C, D, E)
+    var numColsToRead = 4;
+    var data = sheetPeserta.getRange(2, startCol, lastRow - 1, numColsToRead).getValues();
     var list = [];
+
     for (var i = 0; i < data.length; i++) {
-      var bib = String(data[i][0]).trim();
-      var name = String(data[i][1]).trim();
-      var category = String(data[i][2]).trim();
-      if (bib || name) {
-        list.push({
-          bib: bib,
-          name: name,
-          category: category || 'Trail',
-          status: 'dns',
-          startTime: null,
-          splits: [],
-          finishTime: null,
-          totalMs: null,
-          history: []
-        });
+      var rawBib = String(data[i][0] !== null && data[i][0] !== undefined ? data[i][0] : '').trim();
+      var rawName = String(data[i][1] || '').trim();
+      var rawCat = String(data[i][2] || '').trim();
+      var rawStatus = String(data[i][3] || '').trim().toLowerCase();
+
+      var bib = rawBib;
+      var name = rawName;
+      var category = rawCat || 'Trail';
+      var status = 'dns';
+
+      if (rawStatus === 'finish' || rawStatus === 'finished') {
+        status = 'finished';
+      } else if (rawStatus === 'berlari' || rawStatus === 'running') {
+        status = 'running';
+      } else if (rawStatus === 'dnf') {
+        status = 'dnf';
       }
+
+      // Koreksi Cerdas jika kolom BIB kosong tapi Nama diawali angka
+      if (!bib && name) {
+        var match = name.match(/^(\d+)\s*(.*)$/);
+        if (match) {
+          bib = match[1];
+          name = match[2] || ('Peserta ' + bib);
+        } else {
+          bib = String(100 + i + 1);
+        }
+      }
+
+      // Pastikan BIB tidak kosong
+      if (!bib) {
+        bib = String(i + 1);
+      }
+
+      list.push({
+        bib: bib,
+        name: name || ('Peserta ' + bib),
+        category: category,
+        status: status,
+        startTime: (status === 'running' || status === 'finished') ? Date.now() : null,
+        splits: [],
+        finishTime: (status === 'finished') ? Date.now() : null,
+        totalMs: null,
+        history: []
+      });
     }
 
     return ContentService.createTextOutput(JSON.stringify({
@@ -129,7 +163,7 @@ function doPost(e) {
 }
 
 /**
- * Inisialisasi sheet dan header jika belum ada
+ * Inisialisasi sheet dan header jika belum ada (dengan Kolom 'No.' di paling kiri)
  */
 function initSpreadsheetStructure(ss) {
   // 1. Sheet Timing_Logs
@@ -137,6 +171,7 @@ function initSpreadsheetStructure(ss) {
   if (!sheetLogs) {
     sheetLogs = ss.insertSheet('Timing_Logs');
     sheetLogs.appendRow([
+      'No.',
       'Server Time',
       'Device Timestamp',
       'Device ID',
@@ -152,8 +187,20 @@ function initSpreadsheetStructure(ss) {
       'Kecepatan (km/h)',
       'Log ID'
     ]);
-    sheetLogs.getRange(1, 1, 1, 14).setFontWeight('bold').setBackground('#0f766e').setFontColor('#ffffff');
+    sheetLogs.getRange(1, 1, 1, 15).setFontWeight('bold').setBackground('#0f766e').setFontColor('#ffffff');
     sheetLogs.setFrozenRows(1);
+  } else {
+    // Migrasi otomatis jika sheet sudah ada tapi belum ada kolom 'No.'
+    if (sheetLogs.getRange(1, 1).getValue().toString().toLowerCase() !== 'no.') {
+      sheetLogs.insertColumnBefore(1);
+      sheetLogs.getRange(1, 1).setValue('No.').setFontWeight('bold').setBackground('#0f766e').setFontColor('#ffffff');
+      var numRows = sheetLogs.getLastRow() - 1;
+      if (numRows > 0) {
+        var numbers = [];
+        for (var n = 1; n <= numRows; n++) numbers.push([n]);
+        sheetLogs.getRange(2, 1, numRows, 1).setValues(numbers);
+      }
+    }
   }
 
   // 2. Sheet Peserta (Master & Real-time Progress)
@@ -161,6 +208,7 @@ function initSpreadsheetStructure(ss) {
   if (!sheetPeserta) {
     sheetPeserta = ss.insertSheet('Peserta');
     sheetPeserta.appendRow([
+      'No.',
       'BIB',
       'Nama Peserta',
       'Kategori',
@@ -172,8 +220,20 @@ function initSpreadsheetStructure(ss) {
       'Avg Speed (km/h)',
       'Terakhir Diperbarui'
     ]);
-    sheetPeserta.getRange(1, 1, 1, 10).setFontWeight('bold').setBackground('#1e293b').setFontColor('#ffffff');
+    sheetPeserta.getRange(1, 1, 1, 11).setFontWeight('bold').setBackground('#1e293b').setFontColor('#ffffff');
     sheetPeserta.setFrozenRows(1);
+  } else {
+    // Migrasi otomatis jika sheet sudah ada tapi belum ada kolom 'No.'
+    if (sheetPeserta.getRange(1, 1).getValue().toString().toLowerCase() !== 'no.') {
+      sheetPeserta.insertColumnBefore(1);
+      sheetPeserta.getRange(1, 1).setValue('No.').setFontWeight('bold').setBackground('#1e293b').setFontColor('#ffffff');
+      var numRowsPeserta = sheetPeserta.getLastRow() - 1;
+      if (numRowsPeserta > 0) {
+        var numbersPeserta = [];
+        for (var np = 1; np <= numRowsPeserta; np++) numbersPeserta.push([np]);
+        sheetPeserta.getRange(2, 1, numRowsPeserta, 1).setValues(numbersPeserta);
+      }
+    }
   }
 }
 
@@ -192,6 +252,8 @@ function processBatchLogs(ss, data) {
   var logRows = [];
   var participantUpdates = {};
 
+  var startNo = sheetLogs.getLastRow(); // Baris berikutnya untuk nomor urut log
+
   for (var i = 0; i < logs.length; i++) {
     var l = logs[i];
     var bib = String(l.bib || '').trim();
@@ -207,6 +269,7 @@ function processBatchLogs(ss, data) {
     }
 
     logRows.push([
+      startNo + i,
       serverTime,
       l.device_timestamp || '',
       deviceId,
@@ -227,7 +290,7 @@ function processBatchLogs(ss, data) {
     if (bib) {
       participantUpdates[bib] = {
         bib: bib,
-        name: l.participant_name || '',
+        name: participantName,
         category: l.category || '',
         status: (l.action === 'FINISH') ? 'Finish' : ((l.action === 'DNF') ? 'DNF' : 'Berlari'),
         lastStation: l.checkpoint_name || l.action,
@@ -252,14 +315,15 @@ function processBatchLogs(ss, data) {
 }
 
 /**
- * Update data ringkasan peserta di sheet Peserta
+ * Update data ringkasan peserta di sheet Peserta (dengan kolom No. di Kolom A)
  */
 function updatePesertaSheet(sheet, updates) {
   var lastRow = sheet.getLastRow();
   var bibMap = {};
 
+  // Kolom A adalah No., Kolom B adalah BIB
   if (lastRow > 1) {
-    var bibData = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    var bibData = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
     for (var r = 0; r < bibData.length; r++) {
       var rowBib = String(bibData[r][0]).trim();
       if (rowBib) {
@@ -284,11 +348,12 @@ function updatePesertaSheet(sheet, updates) {
     ];
 
     if (bibMap[bib]) {
-      // Row exists -> update
-      sheet.getRange(bibMap[bib], 1, 1, 10).setValues([rowValues]);
+      // Baris sudah ada -> update kolom B sampai K (kolom 2 sampai 11), No. di kolom A tetap
+      sheet.getRange(bibMap[bib], 2, 1, 10).setValues([rowValues]);
     } else {
-      // New row -> append
-      sheet.appendRow(rowValues);
+      // Baris baru -> tambahkan No. urut baru di kolom A
+      var newNo = sheet.getLastRow(); // row 2 mendapatkan No. 1, dst.
+      sheet.appendRow([newNo].concat(rowValues));
       bibMap[bib] = sheet.getLastRow();
     }
   }

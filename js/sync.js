@@ -92,56 +92,69 @@ class TrailSync {
     }
 
     const pendingLogs = await TrailDB.getPendingLogs();
-    if (!pendingLogs || pendingLogs.length === 0) {
-      return {
-        success: true,
-        count: 0,
-        message: 'Semua data sudah tersinkronisasi.'
-      };
-    }
-
     this.isSyncing = true;
+    let pushCount = 0;
+    let pullCount = 0;
+
     try {
-      const stationName = await TrailDB.getSetting('station_name', this.stationName);
-      const payload = {
-        action: 'batch_timing_sync',
-        device_id: this.deviceId,
-        station_name: stationName,
-        client_timestamp: new Date().toISOString(),
-        logs: pendingLogs
-      };
+      // 1. PUSH: Kirim pending logs jika ada
+      if (pendingLogs && pendingLogs.length > 0) {
+        const stationName = await TrailDB.getSetting('station_name', this.stationName);
+        const payload = {
+          action: 'batch_timing_sync',
+          device_id: this.deviceId,
+          station_name: stationName,
+          client_timestamp: new Date().toISOString(),
+          logs: pendingLogs
+        };
 
-      console.log(`[TrailSync] Mengirim ${pendingLogs.length} data ke server...`);
+        console.log(`[TrailSync] Mengirim ${pendingLogs.length} data ke server...`);
 
-      const response = await fetch(backendUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8' // Preferred for Google Apps Script CORS
-        },
-        body: JSON.stringify(payload),
-        redirect: 'follow'
-      });
+        const response = await fetch(backendUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8'
+          },
+          body: JSON.stringify(payload),
+          redirect: 'follow'
+        });
 
-      if (!response.ok) {
-        throw new Error(`Server merespon dengan status ${response.status}`);
+        if (response.ok) {
+          const syncedIds = pendingLogs.map(l => l.id);
+          await TrailDB.markLogsAsSynced(syncedIds);
+          pushCount = syncedIds.length;
+          console.log(`[TrailSync] Berhasil mensinkronkan ${pushCount} data.`);
+        }
       }
 
-      const result = await response.json().catch(() => ({ status: 'success' }));
-      
-      // If server confirmed success, mark as synced in local DB
-      const syncedIds = pendingLogs.map(l => l.id);
-      await TrailDB.markLogsAsSynced(syncedIds);
-
-      console.log(`[TrailSync] Berhasil mensinkronkan ${syncedIds.length} data.`);
+      // 2. PULL: Tarik data master peserta dari Google Sheets (terutama saat manual sync)
+      if (isManual) {
+        const pullRes = await this.pullParticipantsFromCloud();
+        if (pullRes && pullRes.success) {
+          pullCount = pullRes.count || 0;
+        }
+      }
 
       if (typeof this.onSyncComplete === 'function') {
-        this.onSyncComplete({ success: true, count: syncedIds.length, isManual });
+        this.onSyncComplete({ success: true, count: pushCount, pullCount: pullCount, isManual });
+      }
+
+      let msg = '';
+      if (pushCount > 0 && pullCount > 0) {
+        msg = `Sync Berhasil: Mengirim ${pushCount} log & menarik ${pullCount} peserta dari Google Sheets!`;
+      } else if (pushCount > 0) {
+        msg = `Berhasil mengirim ${pushCount} catatan waktu ke server!`;
+      } else if (pullCount > 0) {
+        msg = `Berhasil menarik ${pullCount} peserta dari Google Sheets!`;
+      } else {
+        msg = `Semua data sudah tersinkronisasi dengan Google Sheets.`;
       }
 
       return {
         success: true,
-        count: syncedIds.length,
-        message: `Berhasil mensinkronkan ${syncedIds.length} catatan waktu!`
+        count: pushCount,
+        pullCount: pullCount,
+        message: msg
       };
 
     } catch (err) {
@@ -149,7 +162,7 @@ class TrailSync {
       return {
         success: false,
         error: err,
-        message: `Gagal mengirim data: ${err.message || 'Koneksi tidak stabil'}. Data tetap tersimpan aman di HP.`
+        message: `Gagal sinkronisasi: ${err.message || 'Koneksi tidak stabil'}. Data tetap tersimpan aman di HP.`
       };
     } finally {
       this.isSyncing = false;
@@ -177,7 +190,7 @@ class TrailSync {
     }
 
     try {
-      const url = backendUrl + (backendUrl.includes('?') ? '&' : '?') + 'action=get_participants';
+      const url = backendUrl + (backendUrl.includes('?') ? '&' : '?') + 'action=get_participants&t=' + Date.now();
       const response = await fetch(url, { method: 'GET', redirect: 'follow' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
@@ -206,6 +219,70 @@ class TrailSync {
   }
 
   // --- CSV / JSON EXPORT FOR PHYSICAL BACKUP ---
+  /**
+   * Unduh Berkas Template Excel (.xls) Asli dengan Kolom & Baris Rapi
+   * Langsung terbuka dalam kolom A, B, C, D di Microsoft Excel tanpa masalah separator CSV
+   */
+  static downloadParticipantTemplate() {
+    const headers = ['BIB', 'Nama Peserta', 'Kategori', 'Tim atau Komunitas'];
+    const sampleRows = [
+      ['101', 'Budi Santoso', '21K Trail', 'Merbabu Runners'],
+      ['102', 'Siti Rahma', '21K Trail', 'Rinjani Trail Club'],
+      ['103', 'Andi Wijaya', '10K Fun Trail', 'Solo Trail Squad'],
+      ['104', 'Dewi Lestari', '10K Fun Trail', 'Bandung Trail Running'],
+      ['105', 'Rian Pratama', '50K Ultra', 'Salomon Squad'],
+      ['106', 'Fajar Nugraha', '21K Trail', 'Semarang Trail Enthusiast']
+    ];
+
+    let tableHtml = `
+      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <!--[if gte mso 9]>
+        <xml>
+          <x:ExcelWorkbook>
+            <x:ExcelWorksheets>
+              <x:ExcelWorksheet>
+                <x:Name>Data Peserta</x:Name>
+                <x:WorksheetOptions>
+                  <x:DisplayGridlines/>
+                </x:WorksheetOptions>
+              </x:ExcelWorksheet>
+            </x:ExcelWorksheets>
+          </x:ExcelWorkbook>
+        </xml>
+        <![endif]-->
+        <meta http-equiv="content-type" content="application/vnd.ms-excel; charset=UTF-8">
+        <style>
+          th { background-color: #0f766e; color: #ffffff; font-weight: bold; border: 1px solid #243b4a; padding: 8px 12px; }
+          td { border: 1px solid #cbd5e1; padding: 6px 10px; font-family: sans-serif; }
+          .num { mso-number-format: "\\@"; text-align: center; font-weight: bold; }
+        </style>
+      </head>
+      <body>
+        <table>
+          <thead>
+            <tr>
+              ${headers.map(h => `<th>${h}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${sampleRows.map(row => `
+              <tr>
+                <td class="num">${row[0]}</td>
+                <td>${row[1]}</td>
+                <td>${row[2]}</td>
+                <td>${row[3]}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </body>
+      </html>
+    `.trim();
+
+    this.downloadFile(tableHtml, 'Template_Peserta_TrailTimer.xls', 'application/vnd.ms-excel;charset=utf-8;');
+  }
+
   static async exportLogsCSV() {
     const logs = await TrailDB.getAllTimingLogs();
     if (!logs || logs.length === 0) {

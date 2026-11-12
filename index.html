@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 <html lang="id">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>TrailTimer - Pencatatan Waktu Trail Running</title>
-  
+
   <!-- PWA & Mobile Meta Tags -->
   <meta name="theme-color" content="#0f766e">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -17,6 +18,7 @@
   <!-- Core Stylesheet (100% Offline-Ready) -->
   <link rel="stylesheet" href="./css/style.css">
 </head>
+
 <body>
 
   <!-- Toast Notification Container -->
@@ -29,7 +31,9 @@
         <img src="./icons/icon.svg" alt="Logo TrailTimer" class="brand-icon">
         <div>
           <span class="brand-title">TrailTimer</span>
-          <button id="btnRoleBadge" class="brand-tag" style="cursor: pointer; border: none; outline: none; font-size: 0.72rem; padding: 2px 8px;" title="Klik untuk beralih mode Admin / Petugas Pos">
+          <button id="btnRoleBadge" class="brand-tag"
+            style="cursor: pointer; border: none; outline: none; font-size: 0.72rem; padding: 2px 8px;"
+            title="Klik untuk beralih mode Admin / Petugas Pos">
             👑 Admin Mode
           </button>
         </div>
@@ -44,11 +48,13 @@
 
         <!-- Pending Sync Badge / Quick Trigger -->
         <button id="quickSyncBtn" class="sync-btn" title="Klik untuk sinkronisasi ke server sekarang">
-          <svg class="sync-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          <svg class="sync-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2.5">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
           </svg>
-          <svg class="sync-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+          <svg class="sync-spinner" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2.5">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
           </svg>
           <span id="pendingBadgeText">0 Antrean</span>
         </button>
@@ -63,7 +69,7 @@
     <!-- VIEW 1: RACE TIMER DASHBOARD (UTAMA)      -->
     <!-- ========================================== -->
     <section id="viewDashboard" class="tab-view active">
-      
+
       <!-- Quick BIB Puncher Bar (Field Marshal Fast Entry) -->
       <div class="quick-punch-bar">
         <div class="quick-punch-title" style="flex-wrap: wrap;">
@@ -73,15 +79,19 @@
             </svg>
             <span>Pos Anda:</span>
           </div>
-          <select id="quickStationSelect" class="form-select" style="padding: 3px 8px; font-size: 0.8rem; width: auto; font-weight: 700; color: var(--accent-amber-light); background: #0c161e; border: 1px solid var(--accent-amber); border-radius: var(--radius-sm);" title="Pilih Pos Tempat Anda Bertugas">
+          <select id="quickStationSelect" class="form-select"
+            style="padding: 3px 8px; font-size: 0.8rem; width: auto; font-weight: 700; color: var(--accent-amber-light); background: #0c161e; border: 1px solid var(--accent-amber); border-radius: var(--radius-sm);"
+            title="Pilih Pos Tempat Anda Bertugas">
             <!-- Dynamically populated based on Route Checkpoints -->
           </select>
         </div>
 
         <form id="quickPunchForm" class="quick-punch-form" onsubmit="return false;">
-          <input type="text" id="quickBibInput" class="quick-bib-input" placeholder="BIB" inputmode="numeric" autocomplete="off" maxlength="8">
+          <input type="text" id="quickBibInput" class="quick-bib-input" placeholder="BIB" inputmode="numeric"
+            autocomplete="off" maxlength="8">
           <div class="quick-action-btns">
-            <button type="button" id="btnQuickCp" class="btn btn-primary btn-sm" title="Catat waktu tiba di checkpoint berikutnya">
+            <button type="button" id="btnQuickCp" class="btn btn-primary btn-sm"
+              title="Catat waktu tiba di checkpoint berikutnya">
               PUNCH CP
             </button>
             <button type="button" id="btnQuickFinish" class="btn btn-accent btn-sm" title="Catat waktu finish pelari">
@@ -117,7 +127,8 @@
       <!-- Action & Filter Toolbar -->
       <div class="toolbar">
         <div class="search-box">
-          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2">
             <circle cx="11" cy="11" r="8"></circle>
             <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
           </svg>
@@ -131,7 +142,7 @@
             </svg>
             Start Massal
           </button>
-          
+
           <select id="filterCategory" class="form-select" style="width: auto; padding: 6px 12px; font-size: 0.82rem;">
             <option value="Semua">Semua Kategori</option>
           </select>
@@ -175,24 +186,32 @@
     <!-- VIEW 2: SETUP PESERTA & RUTE              -->
     <!-- ========================================== -->
     <section id="viewSetup" class="tab-view">
-      
+
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h2>Manajemen Peserta & Pengaturan Rute</h2>
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button id="btnPullFromCloud" class="btn btn-primary btn-sm" title="Tarik data peserta master dari Google Sheets">
+          <button id="btnPullFromCloud" class="btn btn-primary btn-sm"
+            title="Tarik data peserta master dari Google Sheets">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
             </svg>
             Tarik dari Google Sheets
           </button>
-          <button id="btnLoadDemoSetup" class="btn btn-outline btn-sm">
+          <!-- <button id="btnLoadDemoSetup" class="btn btn-outline btn-sm">
             Muat Data Demo
-          </button>
+          </button> -->
           <button id="btnOpenImportModal" class="btn btn-accent btn-sm">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
             </svg>
             Import CSV / Teks
+          </button>
+          <button id="btnDownloadTemplate" class="btn btn-outline btn-sm"
+            title="Unduh format template Excel/CSV untuk diisi dan diimpor">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+            </svg>
+            Download Template Excel
           </button>
           <button id="btnExportParticipants" class="btn btn-outline btn-sm">
             Export CSV
@@ -202,7 +221,7 @@
 
       <!-- Grid layout for Setup -->
       <div style="display: grid; grid-template-columns: 1fr; gap: 16px;">
-        
+
         <!-- Form Tambah Peserta Manual -->
         <div class="settings-card">
           <h3>
@@ -218,7 +237,8 @@
             <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 10px;">
               <div class="form-group">
                 <label class="form-label" for="inputBib">Nomor BIB *</label>
-                <input type="text" id="inputBib" class="form-input" placeholder="Contoh: 101" required inputmode="numeric">
+                <input type="text" id="inputBib" class="form-input" placeholder="Contoh: 101" required
+                  inputmode="numeric">
               </div>
               <div class="form-group">
                 <label class="form-label" for="inputName">Nama Lengkap *</label>
@@ -229,7 +249,8 @@
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
               <div class="form-group">
                 <label class="form-label" for="inputCategory">Kategori Lomba *</label>
-                <input type="text" id="inputCategory" class="form-input" placeholder="Contoh: 21K Trail" list="categoriesDatalist" required>
+                <input type="text" id="inputCategory" class="form-input" placeholder="Contoh: 21K Trail"
+                  list="categoriesDatalist" required>
                 <datalist id="categoriesDatalist"></datalist>
               </div>
               <div class="form-group">
@@ -261,7 +282,8 @@
           </div>
 
           <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 14px;">
-            Atur pos checkpoint dari garis Start hingga Finish beserta jarak tiap segmen untuk perhitungan otomatis Pace (min/km) dan Kecepatan (km/jam).
+            Atur pos checkpoint dari garis Start hingga Finish beserta jarak tiap segmen untuk perhitungan otomatis Pace
+            (min/km) dan Kecepatan (km/jam).
           </p>
 
           <div id="checkpointsList" class="cp-list">
@@ -314,8 +336,9 @@
     <!-- VIEW 3: KLASEMEN & LEADERBOARD            -->
     <!-- ========================================== -->
     <section id="viewLeaderboard" class="tab-view">
-      
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+
+      <div
+        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
         <div>
           <h2>Klasemen & Rekap Hasil</h2>
           <p style="font-size: 0.82rem; color: var(--text-muted);">
@@ -324,7 +347,8 @@
         </div>
 
         <div style="display: flex; gap: 8px;">
-          <select id="leaderboardCategoryFilter" class="form-select" style="width: auto; padding: 6px 12px; font-size: 0.82rem;">
+          <select id="leaderboardCategoryFilter" class="form-select"
+            style="width: auto; padding: 6px 12px; font-size: 0.82rem;">
             <option value="Semua">Semua Kategori</option>
           </select>
           <button id="btnExportLeaderboard" class="btn btn-primary btn-sm">
@@ -372,7 +396,7 @@
     <!-- VIEW 4: PENGATURAN & SINKRONISASI OFFLINE  -->
     <!-- ========================================== -->
     <section id="viewSettings" class="tab-view">
-      
+
       <h2 style="margin-bottom: 16px;">Pengaturan & Sinkronisasi Offline</h2>
 
       <div class="settings-card">
@@ -384,12 +408,14 @@
           Koneksi Backend (Google Apps Script / Webhook)
         </h3>
         <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 14px;">
-          Masukkan Web App URL dari deployment Google Apps Script Anda. Begitu ada koneksi internet, data antrean offline di HP panitia otomatis dikirim ke Google Sheets.
+          Masukkan Web App URL dari deployment Google Apps Script Anda. Begitu ada koneksi internet, data antrean
+          offline di HP panitia otomatis dikirim ke Google Sheets.
         </p>
 
         <div class="form-group">
           <label class="form-label" for="settingBackendUrl">Google Apps Script Web App URL</label>
-          <input type="url" id="settingBackendUrl" class="form-input" placeholder="https://script.google.com/macros/s/AKfycb.../exec">
+          <input type="url" id="settingBackendUrl" class="form-input"
+            placeholder="https://script.google.com/macros/s/AKfycb.../exec">
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
@@ -408,8 +434,9 @@
             Simpan Pengaturan
           </button>
           <button id="btnManualSyncNow" class="btn btn-accent btn-sm">
-            <svg class="sync-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+            <svg class="sync-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2.5">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
             </svg>
             Sync Sekarang
           </button>
@@ -429,7 +456,9 @@
           <span class="brand-tag">Fitur Koordinator</span>
         </div>
         <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 14px;">
-          Koordinator cukup membagikan link khusus per pos di bawah ke WhatsApp masing-masing panitia. Ketika dibuka di HP panitia, <strong>sistem otomatis terkonfigurasi untuk pos tersebut dan menu pengaturan sensitif disembunyikan</strong>. Panitia pos tidak perlu setting apa-apa lagi!
+          Koordinator cukup membagikan link khusus per pos di bawah ke WhatsApp masing-masing panitia. Ketika dibuka di
+          HP panitia, <strong>sistem otomatis terkonfigurasi untuk pos tersebut dan menu pengaturan sensitif
+            disembunyikan</strong>. Panitia pos tidak perlu setting apa-apa lagi!
         </p>
 
         <div id="marshalLinksContainer" style="display: flex; flex-direction: column; gap: 10px;">
@@ -450,7 +479,8 @@
           PIN ini digunakan untuk membuka kunci mode Admin jika dibuka dari perangkat panitia pos.
         </p>
         <div style="display: flex; gap: 8px; max-width: 320px;">
-          <input type="password" id="inputAdminPin" class="form-input" placeholder="PIN Admin (Default: 1234)" maxlength="8">
+          <input type="password" id="inputAdminPin" class="form-input" placeholder="PIN Admin (Default: 1234)"
+            maxlength="8">
           <button id="btnSaveAdminPin" class="btn btn-outline btn-sm">Simpan PIN</button>
         </div>
       </div>
@@ -505,7 +535,8 @@
           Cadangan & Pemulihan Database Lengkap
         </h3>
         <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 14px;">
-          Gunakan file JSON untuk memindahkan seluruh data lomba ke HP panitia lain secara offline (via Bluetooth / Flashdisk OTG / WhatsApp) tanpa internet.
+          Gunakan file JSON untuk memindahkan seluruh data lomba ke HP panitia lain secara offline (via Bluetooth /
+          Flashdisk OTG / WhatsApp) tanpa internet.
         </p>
 
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
@@ -538,15 +569,23 @@
         <button class="modal-close" data-close="modalImport">&times;</button>
       </div>
       <div class="modal-body">
-        <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 10px;">
-          Format: <code>BIB, Nama Lengkap, Kategori, Tim (Opsional)</code> per baris.
-        </p>
-        <textarea id="importTextArea" class="form-textarea" placeholder="101, Budi Santoso, 21K Trail, Merbabu Runners&#10;102, Siti Rahma, 21K Trail&#10;103, Andi Wijaya, 10K Fun Trail"></textarea>
-        
+        <div
+          style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+          <p style="font-size: 0.82rem; color: var(--text-muted); margin: 0;">
+            Format: <code>BIB, Nama Lengkap, Kategori, Tim (Opsional)</code>
+          </p>
+          <button type="button" id="btnModalDownloadTemplate" class="btn btn-outline btn-sm"
+            style="padding: 3px 8px; font-size: 0.75rem;">
+            📥 Download Template Excel/CSV
+          </button>
+        </div>
+        <textarea id="importTextArea" class="form-textarea"
+          placeholder="101, Budi Santoso, 21K Trail, Merbabu Runners&#10;102, Siti Rahma, 21K Trail&#10;103, Andi Wijaya, 10K Fun Trail"></textarea>
+
         <div style="margin-top: 10px;">
           <label class="btn btn-outline btn-sm" style="display: inline-block; cursor: pointer;">
-            Pilih Berkas CSV dari HP
-            <input type="file" id="importCsvFileInput" accept=".csv, .txt" style="display: none;">
+            Pilih Berkas Excel / CSV dari HP/Laptop
+            <input type="file" id="importCsvFileInput" accept=".csv, .txt, .xls, .tsv" style="display: none;">
           </label>
         </div>
       </div>
@@ -576,9 +615,11 @@
           </select>
         </div>
 
-        <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-md); padding: 10px 12px; margin-top: 10px;">
+        <div
+          style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: var(--radius-md); padding: 10px 12px; margin-top: 10px;">
           <p style="font-size: 0.8rem; color: var(--accent-amber-light);">
-            Hanya peserta dengan status <strong>"Belum Start"</strong> yang akan di-start. Peserta yang sudah berlari tidak akan terpengaruh.
+            Hanya peserta dengan status <strong>"Belum Start"</strong> yang akan di-start. Peserta yang sudah berlari
+            tidak akan terpengaruh.
           </p>
         </div>
       </div>
@@ -599,9 +640,12 @@
       <div class="modal-body">
         <p id="undoRunnerInfo" style="font-weight: 700; margin-bottom: 6px;"></p>
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 14px;">
-          Apakah Anda ingin membatalkan aksi pencatatan waktu terakhir untuk pelari ini? Status dan checkpoint akan dikembalikan ke posisi sebelumnya.
+          Apakah Anda ingin membatalkan aksi pencatatan waktu terakhir untuk pelari ini? Status dan checkpoint akan
+          dikembalikan ke posisi sebelumnya.
         </p>
-        <div id="undoLastActionDetails" style="background: var(--bg-surface); padding: 10px; border-radius: var(--radius-md); font-family: var(--font-mono); font-size: 0.82rem; margin-bottom: 12px;"></div>
+        <div id="undoLastActionDetails"
+          style="background: var(--bg-surface); padding: 10px; border-radius: var(--radius-md); font-family: var(--font-mono); font-size: 0.82rem; margin-bottom: 12px;">
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline btn-sm" data-close="modalUndo">Batal</button>
@@ -619,11 +663,13 @@
       </div>
       <div class="modal-body">
         <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">
-          Perangkat ini saat ini berada dalam <strong>Mode Petugas Pos (Terkunci)</strong>. Masukkan PIN Admin untuk membuka pengaturan penuh.
+          Perangkat ini saat ini berada dalam <strong>Mode Petugas Pos (Terkunci)</strong>. Masukkan PIN Admin untuk
+          membuka pengaturan penuh.
         </p>
         <div class="form-group">
           <label class="form-label" for="dialogPinInput">Masukkan PIN Admin</label>
-          <input type="password" id="dialogPinInput" class="form-input" placeholder="PIN" maxlength="8" inputmode="numeric">
+          <input type="password" id="dialogPinInput" class="form-input" placeholder="PIN" maxlength="8"
+            inputmode="numeric">
         </div>
       </div>
       <div class="modal-footer">
@@ -656,14 +702,18 @@
         <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
         <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
         <path d="M4 22h16"></path>
-        <path d="M10 14.66V17c0 .55-.45 1-1 1H7v4h10v-4h-2c-.55 0-1-.45-1-1v-2.34c3-.51 5-3.08 5-6.32V4H6v4.34c0 3.24 2 5.81 5 6.32z"></path>
+        <path
+          d="M10 14.66V17c0 .55-.45 1-1 1H7v4h10v-4h-2c-.55 0-1-.45-1-1v-2.34c3-.51 5-3.08 5-6.32V4H6v4.34c0 3.24 2 5.81 5 6.32z">
+        </path>
       </svg>
       <span>Klasemen</span>
     </button>
     <button class="nav-item" data-tab="viewSettings" id="navItemSettings">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2">
         <circle cx="12" cy="12" r="3"></circle>
-        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        <path
+          d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+        </path>
       </svg>
       <span>Sync</span>
     </button>
@@ -675,4 +725,5 @@
   <script src="./js/sync.js"></script>
   <script src="./js/app.js"></script>
 </body>
+
 </html>
