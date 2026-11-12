@@ -127,12 +127,10 @@ class TrailSync {
         }
       }
 
-      // 2. PULL: Tarik data master peserta dari Google Sheets (terutama saat manual sync)
-      if (isManual) {
-        const pullRes = await this.pullParticipantsFromCloud();
-        if (pullRes && pullRes.success) {
-          pullCount = pullRes.count || 0;
-        }
+      // 2. PULL: Tarik data master peserta dari Google Sheets (Sinkronisasi 2 Arah Penuh)
+      const pullRes = await this.pullParticipantsFromCloud();
+      if (pullRes && pullRes.success) {
+        pullCount = pullRes.count || 0;
       }
 
       if (typeof this.onSyncComplete === 'function') {
@@ -196,11 +194,40 @@ class TrailSync {
       
       const data = await response.json();
       if (data && Array.isArray(data.participants) && data.participants.length > 0) {
-        await TrailDB.saveParticipantsBatch(data.participants);
+        // Smart Merge: Sinkronkan startTime dan status resmi dari server ke seluruh device
+        const localList = await TrailDB.getAllParticipants();
+        const localMap = {};
+        for (const lp of localList) localMap[String(lp.bib)] = lp;
+
+        for (const sp of data.participants) {
+          const bib = String(sp.bib);
+          if (localMap[bib]) {
+            const lp = localMap[bib];
+            // Sinkronkan waktu start resmi agar timer identik di semua HP
+            if (sp.startTime) {
+              lp.startTime = sp.startTime;
+            }
+            if (sp.status && sp.status !== 'dns') {
+              lp.status = sp.status;
+            }
+            if (sp.finishTime) {
+              lp.finishTime = sp.finishTime;
+            }
+            if (sp.totalMs) {
+              lp.totalMs = sp.totalMs;
+            }
+            lp.name = sp.name || lp.name;
+            lp.category = sp.category || lp.category;
+          } else {
+            localMap[bib] = sp;
+          }
+        }
+
+        await TrailDB.saveParticipantsBatch(Object.values(localMap));
         return {
           success: true,
           count: data.participants.length,
-          message: `Berhasil menarik ${data.participants.length} peserta dari server Google Sheets!`
+          message: `Berhasil sinkronkan ${data.participants.length} peserta dari server Google Sheets!`
         };
       } else {
         return {

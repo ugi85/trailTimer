@@ -41,8 +41,8 @@ function doGet(e) {
 
     var isFirstColNo = sheetPeserta.getRange(1, 1).getValue().toString().toLowerCase().includes('no');
     var startCol = isFirstColNo ? 2 : 1;
-    // Baca hingga kolom Status Terkini (Col B, C, D, E)
-    var numColsToRead = 4;
+    // Baca hingga kolom Start Timestamp (10 kolom dari startCol)
+    var numColsToRead = 10;
     var data = sheetPeserta.getRange(2, startCol, lastRow - 1, numColsToRead).getValues();
     var list = [];
 
@@ -51,6 +51,7 @@ function doGet(e) {
       var rawName = String(data[i][1] || '').trim();
       var rawCat = String(data[i][2] || '').trim();
       var rawStatus = String(data[i][3] || '').trim().toLowerCase();
+      var rawStartTs = parseInt(data[i][9], 10);
 
       var bib = rawBib;
       var name = rawName;
@@ -81,12 +82,18 @@ function doGet(e) {
         bib = String(i + 1);
       }
 
+      var officialStartTime = (!isNaN(rawStartTs) && rawStartTs > 0) ? rawStartTs : null;
+      if (!officialStartTime && (status === 'running' || status === 'finished')) {
+        // Fallback jika belum tersimpan di sheet
+        officialStartTime = Date.now();
+      }
+
       list.push({
         bib: bib,
         name: name || ('Peserta ' + bib),
         category: category,
         status: status,
-        startTime: (status === 'running' || status === 'finished') ? Date.now() : null,
+        startTime: officialStartTime,
         splits: [],
         finishTime: (status === 'finished') ? Date.now() : null,
         totalMs: null,
@@ -189,6 +196,7 @@ function initSpreadsheetStructure(ss) {
     ]);
     sheetLogs.getRange(1, 1, 1, 15).setFontWeight('bold').setBackground('#0f766e').setFontColor('#ffffff');
     sheetLogs.setFrozenRows(1);
+    sheetLogs.getRange('A:A').setNumberFormat('0');
   } else {
     // Migrasi otomatis jika sheet sudah ada tapi belum ada kolom 'No.'
     if (sheetLogs.getRange(1, 1).getValue().toString().toLowerCase() !== 'no.') {
@@ -201,6 +209,7 @@ function initSpreadsheetStructure(ss) {
         sheetLogs.getRange(2, 1, numRows, 1).setValues(numbers);
       }
     }
+    sheetLogs.getRange('A:A').setNumberFormat('0');
   }
 
   // 2. Sheet Peserta (Master & Real-time Progress)
@@ -218,10 +227,12 @@ function initSpreadsheetStructure(ss) {
       'Total Waktu Tempuh',
       'Avg Pace',
       'Avg Speed (km/h)',
+      'Start Timestamp',
       'Terakhir Diperbarui'
     ]);
-    sheetPeserta.getRange(1, 1, 1, 11).setFontWeight('bold').setBackground('#1e293b').setFontColor('#ffffff');
+    sheetPeserta.getRange(1, 1, 1, 12).setFontWeight('bold').setBackground('#1e293b').setFontColor('#ffffff');
     sheetPeserta.setFrozenRows(1);
+    sheetPeserta.getRange('A:A').setNumberFormat('0');
   } else {
     // Migrasi otomatis jika sheet sudah ada tapi belum ada kolom 'No.'
     if (sheetPeserta.getRange(1, 1).getValue().toString().toLowerCase() !== 'no.') {
@@ -234,6 +245,7 @@ function initSpreadsheetStructure(ss) {
         sheetPeserta.getRange(2, 1, numRowsPeserta, 1).setValues(numbersPeserta);
       }
     }
+    sheetPeserta.getRange('A:A').setNumberFormat('0');
   }
 }
 
@@ -288,18 +300,34 @@ function processBatchLogs(ss, data) {
 
     // Track latest status for this BIB
     if (bib) {
-      participantUpdates[bib] = {
-        bib: bib,
-        name: participantName,
-        category: l.category || '',
-        status: (l.action === 'FINISH') ? 'Finish' : ((l.action === 'DNF') ? 'DNF' : 'Berlari'),
-        lastStation: l.checkpoint_name || l.action,
-        lastSplit: formatElapsedGAS(l.split_ms),
-        totalTime: formatElapsedGAS(l.elapsed_ms),
-        pace: l.pace || '',
-        speed: l.speed || '',
-        updatedAt: serverTime
-      };
+      var isStartAction = (l.action === 'START' || l.action === 'MASS_START');
+      if (!participantUpdates[bib]) {
+        participantUpdates[bib] = {
+          bib: bib,
+          name: participantName,
+          category: l.category || '',
+          status: (l.action === 'FINISH') ? 'Finish' : ((l.action === 'DNF') ? 'DNF' : 'Berlari'),
+          lastStation: l.checkpoint_name || l.action,
+          lastSplit: formatElapsedGAS(l.split_ms),
+          totalTime: formatElapsedGAS(l.elapsed_ms),
+          pace: l.pace || '',
+          speed: l.speed || '',
+          startTimestamp: isStartAction ? (l.timestamp || '') : '',
+          updatedAt: serverTime
+        };
+      } else {
+        var existing = participantUpdates[bib];
+        existing.status = (l.action === 'FINISH') ? 'Finish' : ((l.action === 'DNF') ? 'DNF' : 'Berlari');
+        existing.lastStation = l.checkpoint_name || l.action;
+        existing.lastSplit = formatElapsedGAS(l.split_ms);
+        existing.totalTime = formatElapsedGAS(l.elapsed_ms);
+        existing.pace = l.pace || '';
+        existing.speed = l.speed || '';
+        if (isStartAction) {
+          existing.startTimestamp = l.timestamp || '';
+        }
+        existing.updatedAt = serverTime;
+      }
     }
   }
 
@@ -315,7 +343,7 @@ function processBatchLogs(ss, data) {
 }
 
 /**
- * Update data ringkasan peserta di sheet Peserta (dengan kolom No. di Kolom A)
+ * Update data ringkasan peserta di sheet Peserta (dengan kolom No. di Kolom A & Start Timestamp di Kolom K)
  */
 function updatePesertaSheet(sheet, updates) {
   var lastRow = sheet.getLastRow();
@@ -344,12 +372,20 @@ function updatePesertaSheet(sheet, updates) {
       u.totalTime,
       u.pace,
       u.speed,
+      u.startTimestamp || '',
       u.updatedAt
     ];
 
     if (bibMap[bib]) {
-      // Baris sudah ada -> update kolom B sampai K (kolom 2 sampai 11), No. di kolom A tetap
-      sheet.getRange(bibMap[bib], 2, 1, 10).setValues([rowValues]);
+      var rowIdx = bibMap[bib];
+      // Jika baris lama sudah punya startTimestamp tapi update saat ini tidak membawa startTimestamp (misal punch CP), pertahankan startTimestamp yang lama!
+      if (!u.startTimestamp) {
+        var oldStartTs = sheet.getRange(rowIdx, 11).getValue(); // Col K
+        if (oldStartTs) {
+          rowValues[9] = oldStartTs;
+        }
+      }
+      sheet.getRange(rowIdx, 2, 1, 11).setValues([rowValues]);
     } else {
       // Baris baru -> tambahkan No. urut baru di kolom A
       var newNo = sheet.getLastRow(); // row 2 mendapatkan No. 1, dst.
