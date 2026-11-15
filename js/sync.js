@@ -223,6 +223,16 @@ class TrailSync {
           }
         }
 
+        // Hapus peserta lokal yang berstatus DNS jika sudah dihapus dari Google Sheets (Mirroring Peserta Belum Start)
+        const serverBibs = new Set(data.participants.map(sp => String(sp.bib)));
+        for (const lp of localList) {
+          const bibStr = String(lp.bib);
+          if ((!lp.status || lp.status === 'dns') && !serverBibs.has(bibStr)) {
+            delete localMap[bibStr];
+            await TrailDB.deleteParticipant(lp.bib);
+          }
+        }
+
         await TrailDB.saveParticipantsBatch(Object.values(localMap));
         return {
           success: true,
