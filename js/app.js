@@ -25,7 +25,7 @@ const state = {
     ],
     totalDistanceKm: 12.0
   },
-  categories: ['21K Trail', '10K Fun Trail', '50K Ultra'],
+  categories: [],
   backendUrl: '',
   stationName: 'Pos Utama',
   deviceId: '',
@@ -78,17 +78,8 @@ async function loadInitialSettings() {
     await TrailDB.setSetting('route_config', state.routeConfig);
   }
 
-  // Load Categories & auto-sanitize from binary corrupted text
-  const savedCategories = await TrailDB.getSetting('categories');
-  if (savedCategories && Array.isArray(savedCategories)) {
-    const validCats = savedCategories.filter(isValidCategoryName);
-    state.categories = validCats.length > 0 ? validCats : ['21K Trail', '10K Fun Trail', '50K Ultra'];
-    if (validCats.length !== savedCategories.length) {
-      await TrailDB.setSetting('categories', state.categories);
-    }
-  } else {
-    await TrailDB.setSetting('categories', state.categories);
-  }
+  // Categories are dynamically extracted from participants in database
+  state.categories = [];
 
   // Load Backend URL & Station
   state.backendUrl = await TrailDB.getSetting('backend_url', '');
@@ -316,6 +307,7 @@ async function refreshParticipants() {
     return String(a.bib).localeCompare(String(b.bib));
   });
 
+  updateCategoriesList();
   updateTeamsList();
   filterParticipants();
   updateSummaryStats();
@@ -1867,7 +1859,7 @@ async function handleResetEntireDb() {
   const code = prompt('PERINGATAN TINGKAT TINGGI!\nIni akan menghapus SEMUA data peserta, catatan waktu, dan antrean sync di HP ini.\nKetik "RESET" untuk mengonfirmasi:');
   if (code === 'RESET') {
     await TrailDB.resetDatabase();
-    state.categories = ['21K Trail', '10K Fun Trail', '50K Ultra'];
+    state.categories = [];
     populateCategoryDropdowns();
     await refreshParticipants();
     renderSyncQueue();
@@ -1913,12 +1905,14 @@ async function handleClearAppCache() {
   }
 }
 
-// Reset Kategori ke Default
+// Reset / Segarkan Kategori dari Database
 async function handleResetCategories() {
-  state.categories = ['21K Trail', '10K Fun Trail', '50K Ultra'];
-  await TrailDB.setSetting('categories', state.categories);
-  populateCategoryDropdowns();
-  showToast('Daftar kategori berhasil dibersihkan dan direset ke default!', 'success');
+  updateCategoriesList();
+  if (state.categories.length > 0) {
+    showToast(`Daftar kategori disesuaikan dengan database: ${state.categories.join(', ')}`, 'success');
+  } else {
+    showToast('Database belum memiliki kategori peserta. Dropdown dinonaktifkan.', 'info');
+  }
 }
 
 // Restore Database from JSON
@@ -1944,34 +1938,59 @@ async function handleRestoreJson(e) {
 }
 
 // --- UTILITIES: CATEGORIES DROPDOWNS & MODALS ---
+function updateCategoriesList() {
+  const catsSet = new Set();
+  for (const p of state.participants) {
+    if (p.category && p.category.trim() && isValidCategoryName(p.category.trim())) {
+      catsSet.add(p.category.trim());
+    }
+  }
+  state.categories = Array.from(catsSet).sort((a, b) => a.localeCompare(b));
+  TrailDB.setSetting('categories', state.categories);
+  populateCategoryDropdowns();
+}
+
 function populateCategoryDropdowns() {
   const filterSelect = document.getElementById('filterCategory');
   const lbSelect = document.getElementById('leaderboardCategoryFilter');
   const massSelect = document.getElementById('massStartCategory');
+  const massCpCat = document.getElementById('massCpCategory');
+  const massFinishCat = document.getElementById('massFinishCategory');
   const datalist = document.getElementById('categoriesDatalist');
+  const inputCategory = document.getElementById('inputCategory');
 
+  // 1. Datalist untuk Tambah Peserta Manual
+  // Jika database masih kosong / belum ada nama kategori, hilangkan dropdown dan biarkan sebagai kolom input biasa
+  if (datalist) {
+    if (state.categories.length > 0) {
+      datalist.innerHTML = state.categories.map(c => `<option value="${c}"></option>`).join('');
+      if (inputCategory) inputCategory.setAttribute('list', 'categoriesDatalist');
+    } else {
+      datalist.innerHTML = '';
+      if (inputCategory) inputCategory.removeAttribute('list');
+    }
+  }
+
+  // 2. Filter Kategori di Tab Timer & Klasemen
+  const currentFilter = state.selectedCategory || 'Semua';
   const optionsHtml = ['<option value="Semua">Semua Kategori</option>', ...state.categories.map(c => `<option value="${c}">${c}</option>`)].join('');
 
-  if (filterSelect) filterSelect.innerHTML = optionsHtml;
-  if (lbSelect) lbSelect.innerHTML = optionsHtml;
-
-  if (massSelect) {
-    massSelect.innerHTML = ['<option value="ALL">Semua Kategori</option>', ...state.categories.map(c => `<option value="${c}">${c}</option>`)].join('');
+  if (filterSelect) {
+    filterSelect.innerHTML = optionsHtml;
+    filterSelect.value = state.categories.includes(currentFilter) ? currentFilter : 'Semua';
+    state.selectedCategory = filterSelect.value;
+  }
+  if (lbSelect) {
+    const currentLb = lbSelect.value || 'Semua';
+    lbSelect.innerHTML = optionsHtml;
+    lbSelect.value = state.categories.includes(currentLb) ? currentLb : 'Semua';
   }
 
-  const massCpCat = document.getElementById('massCpCategory');
-  if (massCpCat) {
-    massCpCat.innerHTML = ['<option value="ALL">Semua Kategori</option>', ...state.categories.map(c => `<option value="${c}">${c}</option>`)].join('');
-  }
-
-  const massFinishCat = document.getElementById('massFinishCategory');
-  if (massFinishCat) {
-    massFinishCat.innerHTML = ['<option value="ALL">Semua Kategori</option>', ...state.categories.map(c => `<option value="${c}">${c}</option>`)].join('');
-  }
-
-  if (datalist) {
-    datalist.innerHTML = state.categories.map(c => `<option value="${c}"></option>`).join('');
-  }
+  // 3. Dropdown di Modal Mass Actions
+  const massOpts = ['<option value="ALL">Semua Kategori</option>', ...state.categories.map(c => `<option value="${c}">${c}</option>`)].join('');
+  if (massSelect) massSelect.innerHTML = massOpts;
+  if (massCpCat) massCpCat.innerHTML = massOpts;
+  if (massFinishCat) massFinishCat.innerHTML = massOpts;
 }
 
 // --- UTILITIES: TEAMS / GROUPS DROPDOWNS ---

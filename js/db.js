@@ -330,9 +330,8 @@ class TrailDB {
   }
 
   static async resetCategories() {
-    const defaultCats = ['21K Trail', '10K Fun Trail', '50K Ultra'];
-    await this.setSetting('categories', defaultCats);
-    return defaultCats;
+    await this.setSetting('categories', []);
+    return [];
   }
 
   static async resetDatabase() {
