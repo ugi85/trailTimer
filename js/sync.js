@@ -191,7 +191,7 @@ class TrailSync {
       const url = backendUrl + (backendUrl.includes('?') ? '&' : '?') + 'action=get_participants&t=' + Date.now();
       const response = await fetch(url, { method: 'GET', redirect: 'follow' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      
+
       const data = await response.json();
       if (data && Array.isArray(data.participants) && data.participants.length > 0) {
         // Smart Merge: Sinkronkan startTime dan status resmi dari server ke seluruh device

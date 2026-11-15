@@ -501,6 +501,25 @@ function updatePesertaSheet(sheet, updates) {
 
     if (bibMap[bib]) {
       var rowIdx = bibMap[bib];
+      // Pertahankan nilai yang sudah ada di sheet jika update baru tidak membawanya
+      if (!u.team) {
+        var oldTeam = sheet.getRange(rowIdx, 5).getValue();
+        if (oldTeam) {
+          rowValues[3] = oldTeam;
+        }
+      }
+      if (!u.name) {
+        var oldName = sheet.getRange(rowIdx, 3).getValue();
+        if (oldName) {
+          rowValues[1] = oldName;
+        }
+      }
+      if (!u.category) {
+        var oldCat = sheet.getRange(rowIdx, 4).getValue();
+        if (oldCat) {
+          rowValues[2] = oldCat;
+        }
+      }
       if (!u.startTimestamp) {
         var oldStartTs = sheet.getRange(rowIdx, 12).getValue();
         if (oldStartTs) {
