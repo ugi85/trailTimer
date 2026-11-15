@@ -1,5 +1,5 @@
 /**
- * TrailTimer - Google Apps Script Backend (v1.2)
+ * TrailTimer - Google Apps Script Backend (v1.3)
  * Web App endpoint to receive offline-first timing logs and participant data directly into Google Sheets.
  * 
  * CARA MENGGUNAKAN & MEMPERBAIKI TAMPILAN HEADER:
@@ -7,12 +7,11 @@
  * 2. Klik menu 'Extensions' (Ekstensi) > 'Apps Script'.
  * 3. Hapus seluruh isi lama di 'Code.gs', lalu paste seluruh kode ini.
  * 4. Klik ikon 'Save' (Disket).
- * 5. CARA INSTAN MENAMPILKAN KEMBALI HEADER:
+ * 5. CARA INSTAN MERAPIKAN & MENAMPILKAN HEADER:
  *    - Di bar atas Apps Script, pilih fungsi 'perbaikiDanTampilkanHeader' dari dropdown.
  *    - Klik tombol 'Run' (Jalankan).
- *    - Buka tab Google Sheets Anda: seluruh judul kolom (Header) di sheet 'Peserta' dan 'Timing_Logs'
- *      akan langsung muncul kembali dengan warna kontras dan teks putih tebal!
- *    - Format '12/31/1899' di kolom No. juga otomatis berubah menjadi angka 1, 2, dst.
+ *    - Buka tab Google Sheets Anda: seluruh kolom di sheet 'Peserta' dan 'Timing_Logs'
+ *      akan langsung rapi dan otomatis menyesuaikan kolom BIB dan Nama!
  * 6. Klik tombol biru 'Deploy' di kanan atas > 'Manage deployments' > Ikon pensil > Version: 'New version' > 'Deploy'.
  */
 
@@ -24,7 +23,7 @@ function onOpen() {
     var ui = SpreadsheetApp.getUi();
     ui.createMenu('🏃 TrailTimer')
       .addItem('🛠️ Tampilkan & Perbaiki Header', 'perbaikiDanTampilkanHeader')
-      .addItem('🔢 Rapikan Nomor Urut & Format Kolom', 'rapikanNomorDanFormat')
+      .addItem('🔢 Rapikan Nomor & Kolom Tergeser', 'rapikanNomorDanFormat')
       .addToUi();
   } catch (e) {
     // Non-UI context
@@ -36,8 +35,8 @@ function onOpen() {
  */
 function perbaikiDanTampilkanHeader() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  initSpreadsheetStructure(ss);
   rapikanNomorDanFormat();
+  initSpreadsheetStructure(ss);
   
   try {
     SpreadsheetApp.getActiveSpreadsheet().toast('Header dan format sheet berhasil diperbarui dan ditampilkan kembali!', 'TrailTimer', 5);
@@ -45,23 +44,44 @@ function perbaikiDanTampilkanHeader() {
 }
 
 /**
- * Merapikan nomor urut baris dan memastikan kolom No. berformat angka '0' (bukan tanggal 1899)
+ * Merapikan nomor urut baris dan otomatis menggeser kolom jika data ter-paste mulai dari Kolom A
  */
 function rapikanNomorDanFormat() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
-  // 1. Rapikan sheet Peserta
+  // 1. Sheet Peserta
   var sheetPeserta = ss.getSheetByName('Peserta');
   if (sheetPeserta && sheetPeserta.getLastRow() > 1) {
     var lastRowP = sheetPeserta.getLastRow();
-    sheetPeserta.getRange(2, 1, lastRowP - 1, 1).setNumberFormat('0');
-    var numsP = [];
-    for (var p = 1; p <= lastRowP - 1; p++) numsP.push([p]);
-    sheetPeserta.getRange(2, 1, lastRowP - 1, 1).setValues(numsP);
-    sheetPeserta.getRange(2, 2, lastRowP - 1, 1).setNumberFormat('@'); // Kolom BIB sebagai teks
+
+    // Deteksi cerdas: Jika user mem-paste data Excel mulai dari sel A2 (misal sel A2 berisi angka BIB 101 dan B2 adalah Nama)
+    var sampleA = String(sheetPeserta.getRange(2, 1).getValue() || '').trim();
+    var sampleB = String(sheetPeserta.getRange(2, 2).getValue() || '').trim();
+    var numA = parseInt(sampleA, 10);
+
+    // Jika Kolom A adalah angka BIB (seperti 101, 102) dan Kolom B adalah teks nama orang (ada spasi/huruf)
+    if (!isNaN(numA) && numA > (lastRowP + 5) && isNaN(parseInt(sampleB, 10)) && sampleB.length > 0) {
+      var lowerB = sampleB.toLowerCase();
+      if (lowerB !== 'finish' && lowerB !== 'berlari' && lowerB !== 'running' && lowerB !== 'dns' && lowerB !== 'dnf') {
+        // Data tertempel mulai dari Kolom A -> Sisipkan kolom baru di paling kiri untuk Kolom 'No.'
+        sheetPeserta.insertColumnBefore(1);
+      }
+    }
+
+    initSpreadsheetStructure(ss);
+
+    // Tulis nomor urut 1, 2, 3... di Kolom A
+    var numRowsP = sheetPeserta.getLastRow() - 1;
+    if (numRowsP > 0) {
+      sheetPeserta.getRange(2, 1, numRowsP, 1).setNumberFormat('0');
+      var numsP = [];
+      for (var p = 1; p <= numRowsP; p++) numsP.push([p]);
+      sheetPeserta.getRange(2, 1, numRowsP, 1).setValues(numsP);
+      sheetPeserta.getRange(2, 2, numRowsP, 1).setNumberFormat('@'); // Kolom BIB sebagai teks
+    }
   }
 
-  // 2. Rapikan sheet Timing_Logs
+  // 2. Sheet Timing_Logs
   var sheetLogs = ss.getSheetByName('Timing_Logs');
   if (sheetLogs && sheetLogs.getLastRow() > 1) {
     var lastRowL = sheetLogs.getLastRow();
@@ -109,59 +129,87 @@ function doGet(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    var isFirstColNo = sheetPeserta.getRange(1, 1).getValue().toString().toLowerCase().includes('no');
-    var startCol = isFirstColNo ? 2 : 1;
-    // Baca hingga kolom Start Timestamp (10 kolom dari startCol)
-    var numColsToRead = 10;
-    var data = sheetPeserta.getRange(2, startCol, lastRow - 1, numColsToRead).getValues();
+    // Baca data dari baris 2, mulai kolom 1 (Kolom A) sampai kolom 13
+    var numCols = Math.min(13, Math.max(5, sheetPeserta.getLastColumn()));
+    var allData = sheetPeserta.getRange(2, 1, lastRow - 1, numCols).getValues();
     var list = [];
 
-    for (var i = 0; i < data.length; i++) {
-      var rawBib = String(data[i][0] !== null && data[i][0] !== undefined ? data[i][0] : '').trim();
-      var rawName = String(data[i][1] || '').trim();
-      var rawCat = String(data[i][2] || '').trim();
-      var rawStatus = String(data[i][3] || '').trim().toLowerCase();
-      var rawStartTs = parseInt(data[i][9], 10);
+    // DETEKSI CERDAS: Apakah user menempelkan data Excel mulai dari Kolom A?
+    // Ciri: Kolom A baris 2 berisi angka BIB (misal 101) dan Kolom B berisi teks Nama (misal "Budi Santoso")
+    var isShiftedPaste = false;
+    if (allData.length > 0) {
+      var sampleA = String(allData[0][0] || '').trim();
+      var sampleB = String(allData[0][1] || '').trim();
+      var numA = parseInt(sampleA, 10);
+      if (!isNaN(numA) && isNaN(parseInt(sampleB, 10)) && sampleB.length > 0) {
+        var lowerB = sampleB.toLowerCase();
+        if (lowerB !== 'finish' && lowerB !== 'berlari' && lowerB !== 'running' && lowerB !== 'dns' && lowerB !== 'dnf') {
+          isShiftedPaste = true;
+        }
+      }
+    }
 
-      var bib = rawBib;
-      var name = rawName;
-      var category = rawCat || 'Trail';
-      var status = 'dns';
+    for (var i = 0; i < allData.length; i++) {
+      var row = allData[i];
+      var bib, name, category, team, status = 'dns', officialStartTime = null;
 
-      if (rawStatus === 'finish' || rawStatus === 'finished') {
-        status = 'finished';
-      } else if (rawStatus === 'berlari' || rawStatus === 'running') {
-        status = 'running';
-      } else if (rawStatus === 'dnf') {
-        status = 'dnf';
+      if (isShiftedPaste) {
+        // User menempelkan data mulai Kolom A:
+        // Col A = BIB (101), Col B = Nama (Budi Santoso), Col C = Kategori (AAG Run), Col D = Tim (Grup 1)
+        bib = String(row[0] !== null && row[0] !== undefined ? row[0] : '').trim();
+        name = String(row[1] || '').trim();
+        category = String(row[2] || 'Trail').trim();
+        team = String(row[3] || '').trim();
+        var rawStatusShifted = String(row[4] || '').trim().toLowerCase();
+        if (rawStatusShifted === 'finish' || rawStatusShifted === 'finished') status = 'finished';
+        else if (rawStatusShifted === 'berlari' || rawStatusShifted === 'running') status = 'running';
+        else if (rawStatusShifted === 'dnf') status = 'dnf';
+      } else {
+        // Struktur Normal:
+        // Col A = No., Col B = BIB, Col C = Nama, Col D = Kategori, Col E = Tim / Grup (atau Status)
+        bib = String(row[1] !== null && row[1] !== undefined ? row[1] : '').trim();
+        name = String(row[2] || '').trim();
+        category = String(row[3] || 'Trail').trim();
+        team = String(row[4] || '').trim();
+        var rawStatus = String(row[5] || '').trim().toLowerCase();
+
+        // Jika Col E berisi status lari (misal Finish/Berlari), maka baris belum memiliki kolom Tim
+        if (team.toLowerCase() === 'finish' || team.toLowerCase() === 'berlari' || team.toLowerCase() === 'dns' || team.toLowerCase() === 'dnf') {
+          rawStatus = team.toLowerCase();
+          team = '';
+        }
+
+        if (rawStatus === 'finish' || rawStatus === 'finished') status = 'finished';
+        else if (rawStatus === 'berlari' || rawStatus === 'running') status = 'running';
+        else if (rawStatus === 'dnf') status = 'dnf';
+
+        var rawStartTs = parseInt(row[11] || row[10] || row[9], 10);
+        if (!isNaN(rawStartTs) && rawStartTs > 0) officialStartTime = rawStartTs;
       }
 
-      // Koreksi Cerdas jika kolom BIB kosong tapi Nama diawali angka
+      // Pastikan nomor BIB tidak kosong
       if (!bib && name) {
         var match = name.match(/^(\d+)\s*(.*)$/);
         if (match) {
           bib = match[1];
-          name = match[2] || ('Peserta ' + bib);
+          name = match[2];
         } else {
           bib = String(100 + i + 1);
         }
       }
-
-      // Pastikan BIB tidak kosong
       if (!bib) {
         bib = String(i + 1);
       }
 
-      var officialStartTime = (!isNaN(rawStartTs) && rawStartTs > 0) ? rawStartTs : null;
       if (!officialStartTime && (status === 'running' || status === 'finished')) {
-        // Fallback jika belum tersimpan di sheet
         officialStartTime = Date.now();
       }
 
       list.push({
         bib: bib,
         name: name || ('Peserta ' + bib),
-        category: category,
+        category: category || 'Trail',
+        team: team || '',
         status: status,
         startTime: officialStartTime,
         splits: [],
@@ -174,6 +222,7 @@ function doGet(e) {
     return ContentService.createTextOutput(JSON.stringify({
       status: 'success',
       count: list.length,
+      isShiftedPaste: isShiftedPaste,
       participants: list
     })).setMimeType(ContentService.MimeType.JSON);
   }
@@ -181,7 +230,7 @@ function doGet(e) {
   return ContentService.createTextOutput(JSON.stringify({
     status: 'success',
     app: 'TrailTimer Google Apps Script Backend',
-    version: '1.2',
+    version: '1.3',
     timestamp: new Date().toISOString(),
     message: 'Backend siap menerima dan mengirim data catatan waktu lomba lari!'
   })).setMimeType(ContentService.MimeType.JSON);
@@ -270,13 +319,11 @@ function initSpreadsheetStructure(ss) {
     sheetLogs = ss.insertSheet('Timing_Logs');
   }
 
-  // Periksa apakah kolom pertama adalah 'No.'
   var firstCellLogs = sheetLogs.getRange(1, 1).getValue().toString().trim().toLowerCase();
   if (firstCellLogs !== 'no.' && (firstCellLogs.includes('server') || firstCellLogs.includes('time') || firstCellLogs.includes('1899'))) {
     sheetLogs.insertColumnBefore(1);
   }
 
-  // SELALU tulis dan pastikan header lengkap di Baris 1
   sheetLogs.getRange(1, 1, 1, logHeaders.length)
     .setValues([logHeaders])
     .setFontWeight('bold')
@@ -294,6 +341,7 @@ function initSpreadsheetStructure(ss) {
     'BIB',
     'Nama Peserta',
     'Kategori',
+    'Tim / Grup',
     'Status Terkini',
     'Pos Terakhir',
     'Waktu Split Terakhir',
@@ -313,7 +361,6 @@ function initSpreadsheetStructure(ss) {
     sheetPeserta.insertColumnBefore(1);
   }
 
-  // SELALU tulis dan pastikan header lengkap di Baris 1
   sheetPeserta.getRange(1, 1, 1, pesertaHeaders.length)
     .setValues([pesertaHeaders])
     .setFontWeight('bold')
@@ -341,14 +388,13 @@ function processBatchLogs(ss, data) {
   var logRows = [];
   var participantUpdates = {};
 
-  var startNo = sheetLogs.getLastRow(); // Baris berikutnya untuk nomor urut log
+  var startNo = sheetLogs.getLastRow();
 
   for (var i = 0; i < logs.length; i++) {
     var l = logs[i];
     var bib = String(l.bib || '').trim();
     var participantName = String(l.participant_name || '').trim();
 
-    // Fallback cerdas: Jika BIB kosong tapi Nama diawali angka (misal "103 Dewi Lestari")
     if (!bib && participantName) {
       var match = participantName.match(/^(\d+)\s*(.*)$/);
       if (match) {
@@ -375,7 +421,6 @@ function processBatchLogs(ss, data) {
       l.id || ''
     ]);
 
-    // Track latest status for this BIB
     if (bib) {
       var isStartAction = (l.action === 'START' || l.action === 'MASS_START');
       if (!participantUpdates[bib]) {
@@ -383,6 +428,7 @@ function processBatchLogs(ss, data) {
           bib: bib,
           name: participantName,
           category: l.category || '',
+          team: l.team || '',
           status: (l.action === 'FINISH') ? 'Finish' : ((l.action === 'DNF') ? 'DNF' : 'Berlari'),
           lastStation: l.checkpoint_name || l.action,
           lastSplit: formatElapsedGAS(l.split_ms),
@@ -400,6 +446,7 @@ function processBatchLogs(ss, data) {
         existing.totalTime = formatElapsedGAS(l.elapsed_ms);
         existing.pace = l.pace || '';
         existing.speed = l.speed || '';
+        if (l.team) existing.team = l.team;
         if (isStartAction) {
           existing.startTimestamp = l.timestamp || '';
         }
@@ -408,13 +455,11 @@ function processBatchLogs(ss, data) {
     }
   }
 
-  // Batch append ke Timing_Logs
   if (logRows.length > 0) {
     sheetLogs.getRange(sheetLogs.getLastRow() + 1, 1, logRows.length, logRows[0].length).setValues(logRows);
     sheetLogs.getRange(2, 1, sheetLogs.getLastRow() - 1, 1).setNumberFormat('0');
   }
 
-  // Update sheet Peserta
   updatePesertaSheet(sheetPeserta, participantUpdates);
 
   return logs.length;
@@ -427,13 +472,12 @@ function updatePesertaSheet(sheet, updates) {
   var lastRow = sheet.getLastRow();
   var bibMap = {};
 
-  // Kolom A adalah No., Kolom B adalah BIB
   if (lastRow > 1) {
     var bibData = sheet.getRange(2, 2, lastRow - 1, 1).getValues();
     for (var r = 0; r < bibData.length; r++) {
       var rowBib = String(bibData[r][0]).trim();
       if (rowBib) {
-        bibMap[rowBib] = r + 2; // Row number in sheet (1-based)
+        bibMap[rowBib] = r + 2;
       }
     }
   }
@@ -444,6 +488,7 @@ function updatePesertaSheet(sheet, updates) {
       u.bib,
       u.name,
       u.category,
+      u.team || '',
       u.status,
       u.lastStation,
       u.lastSplit,
@@ -456,17 +501,15 @@ function updatePesertaSheet(sheet, updates) {
 
     if (bibMap[bib]) {
       var rowIdx = bibMap[bib];
-      // Jika baris lama sudah punya startTimestamp tapi update saat ini tidak membawa startTimestamp, pertahankan yang lama
       if (!u.startTimestamp) {
-        var oldStartTs = sheet.getRange(rowIdx, 11).getValue(); // Col K
+        var oldStartTs = sheet.getRange(rowIdx, 12).getValue();
         if (oldStartTs) {
-          rowValues[9] = oldStartTs;
+          rowValues[10] = oldStartTs;
         }
       }
-      sheet.getRange(rowIdx, 2, 1, 11).setValues([rowValues]);
+      sheet.getRange(rowIdx, 2, 1, 12).setValues([rowValues]);
     } else {
-      // Baris baru -> tambahkan No. urut baru di kolom A
-      var newNo = sheet.getLastRow(); // row 2 mendapatkan No. 1, dst.
+      var newNo = sheet.getLastRow();
       sheet.appendRow([newNo].concat(rowValues));
       bibMap[bib] = sheet.getLastRow();
     }

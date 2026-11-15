@@ -218,8 +218,12 @@ class TrailSync {
             }
             lp.name = sp.name || lp.name;
             lp.category = sp.category || lp.category;
+            lp.team = sp.team || lp.team || '';
           } else {
-            localMap[bib] = sp;
+            localMap[bib] = {
+              ...sp,
+              team: sp.team || ''
+            };
           }
         }
 
