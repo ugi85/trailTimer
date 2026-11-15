@@ -329,9 +329,16 @@ class TrailDB {
     return true;
   }
 
+  static async resetCategories() {
+    const defaultCats = ['21K Trail', '10K Fun Trail', '50K Ultra'];
+    await this.setSetting('categories', defaultCats);
+    return defaultCats;
+  }
+
   static async resetDatabase() {
     await this.clearAllParticipants();
     await this.clearAllTimingLogs();
+    await this.resetCategories();
     return true;
   }
 }

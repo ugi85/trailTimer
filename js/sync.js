@@ -243,7 +243,8 @@ class TrailSync {
         return {
           success: true,
           count: 0,
-          message: 'Belum ada data peserta di lembar Google Sheets.'
+          isEmptySheet: true,
+          message: 'Lembar peserta di Google Sheets kosong (0 peserta).'
         };
       }
     } catch (err) {

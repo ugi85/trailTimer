@@ -32,6 +32,17 @@ const state = {
   undoTargetBib: null
 };
 
+// Sanitizer Kategori agar terbebas dari karakter biner rusak dari Excel
+function isValidCategoryName(cat) {
+  if (!cat || typeof cat !== 'string') return false;
+  const s = cat.trim();
+  if (s.length === 0 || s.length > 35) return false;
+  // Buang karakter biner / non-printable / control codes / Excel font metadata
+  if (/[\uFFFD\u0000-\u001F\u007F-\u009F♦%\\{}]/.test(s)) return false;
+  if (/Calibri|Output|Arial|Table|##0|Sheet|Print/i.test(s)) return false;
+  return /^[a-zA-Z0-9\s\-\.\/\+()]{1,35}$/.test(s);
+}
+
 // --- INITIALIZATION ---
 document.addEventListener('DOMContentLoaded', async () => {
   initServiceWorker();
@@ -65,10 +76,14 @@ async function loadInitialSettings() {
     await TrailDB.setSetting('route_config', state.routeConfig);
   }
 
-  // Load Categories
+  // Load Categories & auto-sanitize from binary corrupted text
   const savedCategories = await TrailDB.getSetting('categories');
   if (savedCategories && Array.isArray(savedCategories)) {
-    state.categories = savedCategories;
+    const validCats = savedCategories.filter(isValidCategoryName);
+    state.categories = validCats.length > 0 ? validCats : ['21K Trail', '10K Fun Trail', '50K Ultra'];
+    if (validCats.length !== savedCategories.length) {
+      await TrailDB.setSetting('categories', state.categories);
+    }
   } else {
     await TrailDB.setSetting('categories', state.categories);
   }
@@ -1181,7 +1196,7 @@ async function handleAddParticipantManual(e) {
   await TrailDB.saveParticipant(participant);
 
   // Update categories set
-  if (!state.categories.includes(category)) {
+  if (category && isValidCategoryName(category) && !state.categories.includes(category)) {
     state.categories.push(category);
     await TrailDB.setSetting('categories', state.categories);
     populateCategoryDropdowns();
@@ -1250,7 +1265,7 @@ async function processBulkImport() {
 
     existingBibs.add(bib);
 
-    if (!state.categories.includes(category)) {
+    if (category && isValidCategoryName(category) && !state.categories.includes(category)) {
       state.categories.push(category);
     }
   }
@@ -1528,11 +1543,58 @@ async function handleResetEntireDb() {
   const code = prompt('PERINGATAN TINGKAT TINGGI!\nIni akan menghapus SEMUA data peserta, catatan waktu, dan antrean sync di HP ini.\nKetik "RESET" untuk mengonfirmasi:');
   if (code === 'RESET') {
     await TrailDB.resetDatabase();
+    state.categories = ['21K Trail', '10K Fun Trail', '50K Ultra'];
+    populateCategoryDropdowns();
     await refreshParticipants();
     renderSyncQueue();
     updateSyncBadge();
     showToast('Database lomba berhasil direset sepenuhnya.', 'info');
   }
+}
+
+// Bersihkan Cache Service Worker, Storage & Reset Total (Factory Reset)
+async function handleClearAppCache() {
+  if (!confirm('PERINGATAN BERSIHKAN CACHE & RESET TOTAL:\n\nIni akan membersihkan:\n1. Cache offline Service Worker (PWA)\n2. Seluruh data peserta & log lokal di HP ini\n3. Kategori yang kotor/rusak dan dikembalikan ke default\n\nLanjutkan Factory Reset?')) {
+    return;
+  }
+
+  try {
+    // 1. Reset Database & Categories
+    await TrailDB.resetDatabase();
+
+    // 2. Clear Service Worker Caches
+    if ('caches' in window) {
+      const cacheNames = await caches.keys();
+      await Promise.all(cacheNames.map(name => caches.delete(name)));
+    }
+
+    // 3. Clear LocalStorage except device_id
+    const devId = localStorage.getItem('trailtimer_device_id');
+    localStorage.clear();
+    if (devId) localStorage.setItem('trailtimer_device_id', devId);
+
+    // 4. Unregister Service Workers
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const reg of registrations) {
+        await reg.unregister();
+      }
+    }
+
+    alert('Cache dan seluruh database lokal berhasil dibersihkan! Aplikasi akan dimuat ulang.');
+    window.location.reload(true);
+  } catch (err) {
+    console.error('Gagal membersihkan cache:', err);
+    alert('Terjadi kesalahan saat membersihkan cache: ' + err.message);
+  }
+}
+
+// Reset Kategori ke Default
+async function handleResetCategories() {
+  state.categories = ['21K Trail', '10K Fun Trail', '50K Ultra'];
+  await TrailDB.setSetting('categories', state.categories);
+  populateCategoryDropdowns();
+  showToast('Daftar kategori berhasil dibersihkan dan direset ke default!', 'success');
 }
 
 // Restore Database from JSON
@@ -1893,6 +1955,14 @@ function initEventListeners() {
         Tarik dari Google Sheets
       `;
       if (res.success) {
+        if (res.isEmptySheet && state.participants.length > 0) {
+          if (confirm('Daftar peserta di Google Sheets kosong (0 peserta).\n\nApakah Anda ingin mengosongkan juga daftar peserta di HP ini agar sama persis dengan Google Sheets?')) {
+            await TrailDB.clearAllParticipants();
+            await refreshParticipants();
+            showToast('Daftar peserta di HP telah dikosongkan (sinkron dengan Google Sheets).', 'info');
+            return;
+          }
+        }
         showToast(res.message, 'success');
         await refreshParticipants();
       } else {
@@ -1950,6 +2020,15 @@ function initEventListeners() {
 
   const btnResetDb = document.getElementById('btnResetEntireDb');
   if (btnResetDb) btnResetDb.addEventListener('click', handleResetEntireDb);
+
+  const btnClearAppCache = document.getElementById('btnClearAppCache');
+  if (btnClearAppCache) btnClearAppCache.addEventListener('click', handleClearAppCache);
+
+  const btnResetCats = document.getElementById('btnResetCategories');
+  if (btnResetCats) btnResetCats.addEventListener('click', handleResetCategories);
+
+  const btnQuickResetCat = document.getElementById('btnQuickResetCat');
+  if (btnQuickResetCat) btnQuickResetCat.addEventListener('click', handleResetCategories);
 
   // Role Badge Click (Toggle / Unlock Admin)
   const btnRole = document.getElementById('btnRoleBadge');
