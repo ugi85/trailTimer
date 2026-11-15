@@ -78,6 +78,38 @@ function rapikanNomorDanFormat() {
       for (var p = 1; p <= numRowsP; p++) numsP.push([p]);
       sheetPeserta.getRange(2, 1, numRowsP, 1).setValues(numsP);
       sheetPeserta.getRange(2, 2, numRowsP, 1).setNumberFormat('@'); // Kolom BIB sebagai teks
+
+      // 1b. Bersihkan dan format Kolom L (Start Timestamp) menjadi format tanggal & jam rapi "yyyy-MM-dd HH:mm:ss"
+      var sheetLogs = ss.getSheetByName('Timing_Logs');
+      var startLogsMap = getStartLogsMap(sheetLogs);
+      var timeZone = Session.getScriptTimeZone() || 'Asia/Jakarta';
+
+      sheetPeserta.getRange(2, 12, numRowsP, 1).setNumberFormat('@'); // Format plain text agar tidak diubah Sheets
+      var bibsP = sheetPeserta.getRange(2, 2, numRowsP, 1).getValues();
+      var startsP = sheetPeserta.getRange(2, 12, numRowsP, 1).getValues();
+      var statusP = sheetPeserta.getRange(2, 6, numRowsP, 1).getValues();
+      var updatedStarts = [];
+
+      for (var r = 0; r < numRowsP; r++) {
+        var rBib = String(bibsP[r][0]).trim();
+        var rVal = startsP[r][0];
+        var rStat = String(statusP[r][0]).toLowerCase();
+        var parsed = parseStartTimestamp(rVal);
+
+        // Jika rusak (misal 1/1/1970) atau kosong padahal pelari sedang berlari / finish, pulihkan dari Timing_Logs!
+        if (!parsed && (rStat === 'berlari' || rStat === 'running' || rStat === 'finish' || rStat === 'finished')) {
+          if (rBib && startLogsMap[rBib]) {
+            parsed = startLogsMap[rBib];
+          }
+        }
+
+        if (parsed) {
+          updatedStarts.push([Utilities.formatDate(new Date(parsed), timeZone, 'yyyy-MM-dd HH:mm:ss')]);
+        } else {
+          updatedStarts.push(['']);
+        }
+      }
+      sheetPeserta.getRange(2, 12, numRowsP, 1).setValues(updatedStarts);
     }
   }
 
@@ -86,6 +118,7 @@ function rapikanNomorDanFormat() {
   if (sheetLogs && sheetLogs.getLastRow() > 1) {
     var lastRowL = sheetLogs.getLastRow();
     sheetLogs.getRange(2, 1, lastRowL - 1, 1).setNumberFormat('0');
+    sheetLogs.getRange(2, 2, lastRowL - 1, 1).setNumberFormat('yyyy-mm-dd hh:mm:ss');
     var numsL = [];
     for (var l = 1; l <= lastRowL - 1; l++) numsL.push([l]);
     sheetLogs.getRange(2, 1, lastRowL - 1, 1).setValues(numsL);
@@ -102,6 +135,63 @@ function rapikanNomorDanFormat() {
       }
     }
   }
+}
+
+// ==========================================
+// 1b. SMART TIME PARSER & LOGS RECOVERY
+// ==========================================
+
+/**
+ * Smart Parser untuk Start Timestamp:
+ * Mampu membaca: Date object, epoch ms (1794753209612), serial number Sheets/Excel, dan string "yyyy-MM-dd HH:mm:ss"
+ * Menolak epoch 0 / tahun 1970 (seperti 1/1/1970 7:00:00) yang merupakan tanggal rusak/kosong.
+ */
+function parseStartTimestamp(val) {
+  if (val === null || val === undefined) return null;
+  if (val instanceof Date) {
+    var t = val.getTime();
+    return t > 946684800000 ? t : null; // Tahun 2000 ke atas
+  }
+  if (typeof val === 'number') {
+    if (val > 1e11) return val; // Epoch ms
+    // Serial hari Sheets/Excel (relatif th 1899)
+    var ms = Math.round((val - 25569) * 86400 * 1000);
+    return ms > 946684800000 ? ms : null;
+  }
+  var s = String(val).trim();
+  if (!s) return null;
+  if (/^\d{12,14}$/.test(s)) {
+    var num = parseInt(s, 10);
+    return num > 946684800000 ? num : null;
+  }
+  var cleaned = s.replace(/-/g, '/');
+  var parsed = Date.parse(cleaned);
+  if (!isNaN(parsed) && parsed > 946684800000) return parsed;
+  var d = new Date(s);
+  if (!isNaN(d.getTime()) && d.getTime() > 946684800000) return d.getTime();
+  return null;
+}
+
+/**
+ * Mengambil peta waktu start pertama untuk setiap BIB dari sheet Timing_Logs
+ */
+function getStartLogsMap(sheetLogs) {
+  var map = {};
+  if (!sheetLogs || sheetLogs.getLastRow() <= 1) return map;
+  var numRows = sheetLogs.getLastRow() - 1;
+  var numCols = Math.min(15, sheetLogs.getLastColumn());
+  var data = sheetLogs.getRange(2, 1, numRows, numCols).getValues();
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    // Col F: BIB (idx 5), Col I: Aksi (idx 8), Col C: Device Timestamp (idx 2), Col B: Server Time (idx 1)
+    var bib = String(row[5] || '').trim();
+    var action = String(row[8] || '').trim().toUpperCase();
+    if (bib && (action === 'START' || action === 'MASS_START') && !map[bib]) {
+      var ts = parseStartTimestamp(row[2]) || parseStartTimestamp(row[1]);
+      if (ts) map[bib] = ts;
+    }
+  }
+  return map;
 }
 
 // ==========================================
@@ -129,13 +219,16 @@ function doGet(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
+    // Ambil log start untuk fallback jika startTimestamp di sheet Peserta belum tercatat atau rusak
+    var sheetLogs = ss.getSheetByName('Timing_Logs');
+    var startLogsMap = getStartLogsMap(sheetLogs);
+
     // Baca data dari baris 2, mulai kolom 1 (Kolom A) sampai kolom 13
     var numCols = Math.min(13, Math.max(5, sheetPeserta.getLastColumn()));
     var allData = sheetPeserta.getRange(2, 1, lastRow - 1, numCols).getValues();
     var list = [];
 
     // DETEKSI CERDAS: Apakah user menempelkan data Excel mulai dari Kolom A?
-    // Ciri: Kolom A baris 2 berisi angka BIB (misal 101) dan Kolom B berisi teks Nama (misal "Budi Santoso")
     var isShiftedPaste = false;
     if (allData.length > 0) {
       var sampleA = String(allData[0][0] || '').trim();
@@ -154,8 +247,6 @@ function doGet(e) {
       var bib, name, category, team, status = 'dns', officialStartTime = null;
 
       if (isShiftedPaste) {
-        // User menempelkan data mulai Kolom A:
-        // Col A = BIB (101), Col B = Nama (Budi Santoso), Col C = Kategori (AAG Run), Col D = Tim (Grup 1)
         bib = String(row[0] !== null && row[0] !== undefined ? row[0] : '').trim();
         name = String(row[1] || '').trim();
         category = String(row[2] || 'Trail').trim();
@@ -165,15 +256,12 @@ function doGet(e) {
         else if (rawStatusShifted === 'berlari' || rawStatusShifted === 'running') status = 'running';
         else if (rawStatusShifted === 'dnf') status = 'dnf';
       } else {
-        // Struktur Normal:
-        // Col A = No., Col B = BIB, Col C = Nama, Col D = Kategori, Col E = Tim / Grup (atau Status)
         bib = String(row[1] !== null && row[1] !== undefined ? row[1] : '').trim();
         name = String(row[2] || '').trim();
         category = String(row[3] || 'Trail').trim();
         team = String(row[4] || '').trim();
         var rawStatus = String(row[5] || '').trim().toLowerCase();
 
-        // Jika Col E berisi status lari (misal Finish/Berlari), maka baris belum memiliki kolom Tim
         if (team.toLowerCase() === 'finish' || team.toLowerCase() === 'berlari' || team.toLowerCase() === 'dns' || team.toLowerCase() === 'dnf') {
           rawStatus = team.toLowerCase();
           team = '';
@@ -183,8 +271,8 @@ function doGet(e) {
         else if (rawStatus === 'berlari' || rawStatus === 'running') status = 'running';
         else if (rawStatus === 'dnf') status = 'dnf';
 
-        var rawStartTs = parseInt(row[11] || row[10] || row[9], 10);
-        if (!isNaN(rawStartTs) && rawStartTs > 0) officialStartTime = rawStartTs;
+        // Baca Start Timestamp cerdas dari Kolom L (index 11)
+        officialStartTime = parseStartTimestamp(row[11] || row[10] || row[9]);
       }
 
       // Pastikan nomor BIB tidak kosong
@@ -201,8 +289,13 @@ function doGet(e) {
         bib = String(i + 1);
       }
 
+      // Pulihkan waktu start dari Timing_Logs jika di Peserta belum ada atau rusak (1970)
       if (!officialStartTime && (status === 'running' || status === 'finished')) {
-        officialStartTime = Date.now();
+        if (bib && startLogsMap[bib]) {
+          officialStartTime = startLogsMap[bib];
+        } else {
+          officialStartTime = Date.now();
+        }
       }
 
       list.push({
@@ -333,6 +426,7 @@ function initSpreadsheetStructure(ss) {
   
   sheetLogs.setFrozenRows(1);
   sheetLogs.getRange('A:A').setNumberFormat('0');
+  sheetLogs.getRange('B:B').setNumberFormat('yyyy-mm-dd hh:mm:ss');
 
   // 2. Sheet Peserta (Master & Real-time Progress)
   var sheetPeserta = ss.getSheetByName('Peserta');
@@ -371,6 +465,8 @@ function initSpreadsheetStructure(ss) {
   sheetPeserta.setFrozenRows(1);
   sheetPeserta.getRange('A:A').setNumberFormat('0');
   sheetPeserta.getRange('B:B').setNumberFormat('@');
+  sheetPeserta.getRange('L:L').setNumberFormat('@'); // Start Timestamp plain text format "yyyy-MM-dd HH:mm:ss"
+  sheetPeserta.getRange('M:M').setNumberFormat('yyyy-mm-dd hh:mm:ss');
 }
 
 // ==========================================
@@ -482,8 +578,18 @@ function updatePesertaSheet(sheet, updates) {
     }
   }
 
+  var timeZone = Session.getScriptTimeZone() || 'Asia/Jakarta';
+  var sheetLogs = sheet.getParent().getSheetByName('Timing_Logs');
+  var startLogsMap = getStartLogsMap(sheetLogs);
+
   for (var bib in updates) {
     var u = updates[bib];
+    var formattedStart = '';
+    var parsedNew = parseStartTimestamp(u.startTimestamp);
+    if (parsedNew) {
+      formattedStart = Utilities.formatDate(new Date(parsedNew), timeZone, 'yyyy-MM-dd HH:mm:ss');
+    }
+
     var rowValues = [
       u.bib,
       u.name,
@@ -495,7 +601,7 @@ function updatePesertaSheet(sheet, updates) {
       u.totalTime,
       u.pace,
       u.speed,
-      u.startTimestamp || '',
+      formattedStart,
       u.updatedAt
     ];
 
@@ -520,10 +626,13 @@ function updatePesertaSheet(sheet, updates) {
           rowValues[2] = oldCat;
         }
       }
-      if (!u.startTimestamp) {
+      if (!formattedStart) {
         var oldStartTs = sheet.getRange(rowIdx, 12).getValue();
-        if (oldStartTs) {
-          rowValues[10] = oldStartTs;
+        var parsedOld = parseStartTimestamp(oldStartTs);
+        if (parsedOld) {
+          rowValues[10] = Utilities.formatDate(new Date(parsedOld), timeZone, 'yyyy-MM-dd HH:mm:ss');
+        } else if (startLogsMap && startLogsMap[bib]) {
+          rowValues[10] = Utilities.formatDate(new Date(startLogsMap[bib]), timeZone, 'yyyy-MM-dd HH:mm:ss');
         }
       }
       sheet.getRange(rowIdx, 2, 1, 12).setValues([rowValues]);
@@ -537,6 +646,7 @@ function updatePesertaSheet(sheet, updates) {
   if (sheet.getLastRow() > 1) {
     sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).setNumberFormat('0');
     sheet.getRange(2, 2, sheet.getLastRow() - 1, 1).setNumberFormat('@');
+    sheet.getRange(2, 12, sheet.getLastRow() - 1, 1).setNumberFormat('@');
   }
 }
 
