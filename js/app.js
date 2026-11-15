@@ -14,6 +14,8 @@ const state = {
   activeFilterStatus: 'all',
   searchQuery: '',
   selectedCategory: 'Semua',
+  selectedTeam: 'Semua',
+  teams: [],
   routeConfig: {
     checkpoints: [
       { id: 'start', name: 'Start Gate', distFromPrevKm: 0, cumulativeKm: 0 },
@@ -314,6 +316,7 @@ async function refreshParticipants() {
     return String(a.bib).localeCompare(String(b.bib));
   });
 
+  updateTeamsList();
   filterParticipants();
   updateSummaryStats();
   renderParticipantCards();
@@ -336,16 +339,48 @@ function filterParticipants() {
     filtered = filtered.filter(p => p.category === state.selectedCategory);
   }
 
-  // 3. Search Query (BIB or Name)
+  // 3. Team / Group Filter
+  if (state.selectedTeam && state.selectedTeam !== 'Semua') {
+    filtered = filtered.filter(p => p.team === state.selectedTeam);
+  }
+
+  // 4. Search Query (BIB, Name, Group / Team, or Category)
   if (state.searchQuery.trim() !== '') {
     const q = state.searchQuery.toLowerCase().trim();
     filtered = filtered.filter(p => 
       String(p.bib).toLowerCase().includes(q) || 
-      (p.name && p.name.toLowerCase().includes(q))
+      (p.name && p.name.toLowerCase().includes(q)) ||
+      (p.team && p.team.toLowerCase().includes(q)) ||
+      (p.category && p.category.toLowerCase().includes(q))
     );
   }
 
   state.filteredParticipants = filtered;
+
+  // Update Group Action Bar visibility
+  updateGroupActionBar(filtered);
+}
+
+function updateGroupActionBar(filtered) {
+  const bar = document.getElementById('groupActionBar');
+  const titleEl = document.getElementById('groupActionTitle');
+  if (!bar || !titleEl) return;
+
+  const hasTeamFilter = (state.selectedTeam && state.selectedTeam !== 'Semua');
+  const hasSearch = (state.searchQuery && state.searchQuery.trim().length > 0);
+
+  if ((hasTeamFilter || hasSearch) && filtered.length > 0) {
+    let groupTitle = '';
+    if (hasTeamFilter) {
+      groupTitle = `👥 Grup: ${state.selectedTeam} (${filtered.length} Pelari)`;
+    } else {
+      groupTitle = `👥 Hasil Pencarian "${state.searchQuery}" (${filtered.length} Pelari)`;
+    }
+    titleEl.textContent = groupTitle;
+    bar.style.display = 'flex';
+  } else {
+    bar.style.display = 'none';
+  }
 }
 
 function updateSummaryStats() {
@@ -925,135 +960,406 @@ async function executeUndo() {
   showToast(`Aksi terakhir untuk BIB #${bib} berhasil dibatalkan.`, 'info');
 }
 
-// 6. Mass Start
-async function executeMassStart() {
-  const select = document.getElementById('massStartCategory');
-  const selectedCat = select ? select.value : 'ALL';
+// --- AKSI MASSAL & PUNCHING GRUP / KATEGORI ---
+function resolvePunchTargets(inputVal) {
+  if (!inputVal || !inputVal.trim()) return [];
+  const val = inputVal.trim();
 
-  let targets = state.participants.filter(p => p.status === 'dns');
-  if (selectedCat !== 'ALL') {
-    targets = targets.filter(p => p.category === selectedCat);
+  // 1. Multiple comma-separated BIBs: "101, 102, 103"
+  if (val.includes(',')) {
+    const bibList = val.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    return state.participants.filter(p => bibList.includes(String(p.bib).toLowerCase()));
   }
 
-  if (targets.length === 0) {
-    showToast('Tidak ada pelari dengan status "Belum Start" di kategori ini.', 'info');
-    closeModal('modalMassStart');
-    return;
+  // 2. Exact match with BIB
+  const exactBib = state.participants.find(p => String(p.bib).toLowerCase() === val.toLowerCase());
+  if (exactBib) {
+    return [exactBib];
   }
 
-  const startTimestamp = Date.now();
-  const isoTime = new Date(startTimestamp).toISOString();
-
-  for (const p of targets) {
-    recordStateSnapshot(p);
-    p.status = 'running';
-    p.startTime = startTimestamp;
-    p.splits = [];
-    p.finishTime = null;
-    p.totalMs = null;
-    await TrailDB.saveParticipant(p);
-
-    await TrailDB.addTimingLog({
-      bib: p.bib,
-      participant_name: p.name,
-      category: p.category,
-      action: 'MASS_START',
-      checkpoint_index: 0,
-      checkpoint_name: 'Start Gate',
-      timestamp: startTimestamp,
-      device_timestamp: isoTime,
-      elapsed_ms: 0,
-      split_ms: 0,
-      pace: '--:-- /km',
-      speed: '-- km/h'
-    });
+  // 3. Match with Group / Team (case-insensitive substring)
+  const groupMatches = state.participants.filter(p => 
+    p.team && p.team.toLowerCase().includes(val.toLowerCase())
+  );
+  if (groupMatches.length > 0) {
+    return groupMatches;
   }
 
-  closeModal('modalMassStart');
-  updateSyncBadge();
-  await refreshParticipants();
-  showToast(`Start Massal berhasil untuk ${targets.length} pelari!`, 'success');
+  // 4. Match with Name
+  const nameMatches = state.participants.filter(p => 
+    p.name && p.name.toLowerCase().includes(val.toLowerCase())
+  );
+  if (nameMatches.length > 0) {
+    return nameMatches;
+  }
 
+  // 5. Partial match with BIB
+  const partialBib = state.participants.filter(p => String(p.bib).toLowerCase().includes(val.toLowerCase()));
+  return partialBib;
+}
+
+// Eksekusi Aksi Serentak untuk Satu Rombongan / Grup Pelari
+async function handleMassActionOnTargets(targets, actionType, options = {}) {
+  if (!targets || targets.length === 0) return;
+  const now = Date.now();
+  const label = options.label || (options.groupLabel ? options.groupLabel : `${targets.length} pelari`);
+
+  if (actionType === 'START') {
+    const eligible = targets.filter(p => p.status === 'dns');
+    if (eligible.length === 0) {
+      showToast(`Semua pelari di ${label} sudah dalam status Berlari/Finish.`, 'info');
+      return;
+    }
+    for (const p of eligible) {
+      recordStateSnapshot(p);
+      p.status = 'running';
+      p.startTime = now;
+      p.splits = [];
+      p.finishTime = null;
+      p.totalMs = null;
+      await TrailDB.saveParticipant(p);
+
+      await TrailDB.addTimingLog({
+        bib: p.bib,
+        participant_name: p.name,
+        category: p.category,
+        action: 'START',
+        checkpoint_index: 0,
+        checkpoint_name: 'Start Gate',
+        timestamp: now,
+        device_timestamp: new Date(now).toISOString(),
+        elapsed_ms: 0,
+        split_ms: 0,
+        pace: '--:-- /km',
+        speed: '-- km/h'
+      });
+    }
+    updateSyncBadge();
+    await refreshParticipants();
+    showToast(`▶️ START: Berhasil memulai timer untuk ${eligible.length} pelari (${label})!`, 'success');
+
+  } else if (actionType === 'CP') {
+    const eligible = targets.filter(p => p.status === 'running' || p.status === 'dns');
+    if (eligible.length === 0) {
+      showToast(`Tidak ada pelari aktif di ${label} untuk di-punch Checkpoint.`, 'info');
+      return;
+    }
+
+    const checkpoints = state.routeConfig.checkpoints || [];
+    let stationName = state.stationName;
+    const isMarshal = (state.userRole === 'marshal' && stationName && !stationName.includes('Master'));
+
+    for (const p of eligible) {
+      if (p.status === 'dns') {
+        p.status = 'running';
+        p.startTime = now;
+      }
+      recordStateSnapshot(p);
+
+      let cpIndex, cpName, segmentDistKm;
+      if (isMarshal) {
+        const foundIdx = checkpoints.findIndex(c => c.name.toLowerCase() === stationName.toLowerCase());
+        cpIndex = (foundIdx >= 0) ? foundIdx : ((p.splits || []).length + 1);
+        cpName = stationName;
+        segmentDistKm = (foundIdx >= 0 && checkpoints[foundIdx].distFromPrevKm) ? checkpoints[foundIdx].distFromPrevKm : 0;
+      } else {
+        const splits = p.splits || [];
+        cpIndex = splits.length + 1;
+        if (cpIndex >= checkpoints.length) cpIndex = checkpoints.length - 1;
+        const currentCp = checkpoints[cpIndex] || { name: 'CP ' + cpIndex, distFromPrevKm: 0 };
+        cpName = currentCp.name;
+        segmentDistKm = currentCp.distFromPrevKm || 0;
+      }
+
+      const splits = p.splits || [];
+      const prevTimestamp = (splits.length > 0) ? splits[splits.length - 1].timestamp : p.startTime;
+      const splitData = TrailTimer.calculateSplit(prevTimestamp, now, segmentDistKm);
+      const elapsedTotalMs = now - p.startTime;
+
+      const splitRecord = {
+        cpIndex: cpIndex,
+        cpName: cpName,
+        timestamp: now,
+        splitMs: splitData.splitMs,
+        splitFormatted: splitData.splitFormatted,
+        cumulativeMs: elapsedTotalMs,
+        paceFormatted: splitData.paceFormatted,
+        speedFormatted: splitData.speedFormatted,
+        distKm: segmentDistKm
+      };
+
+      if (!p.splits) p.splits = [];
+      p.splits.push(splitRecord);
+      await TrailDB.saveParticipant(p);
+
+      await TrailDB.addTimingLog({
+        bib: p.bib,
+        participant_name: p.name,
+        category: p.category,
+        action: 'CP',
+        checkpoint_index: cpIndex,
+        checkpoint_name: cpName,
+        timestamp: now,
+        device_timestamp: new Date(now).toISOString(),
+        elapsed_ms: elapsedTotalMs,
+        split_ms: splitData.splitMs,
+        pace: splitData.paceFormatted,
+        speed: splitData.speedFormatted
+      });
+    }
+
+    updateSyncBadge();
+    await refreshParticipants();
+    showToast(`📍 PUNCH CP: Berhasil mencatat ${eligible.length} pelari (${label}) tiba di Checkpoint!`, 'success');
+
+  } else if (actionType === 'FINISH') {
+    const eligible = targets.filter(p => p.status === 'running');
+    if (eligible.length === 0) {
+      showToast(`Tidak ada pelari berstatus 'Berlari' di ${label} untuk di-Finish.`, 'info');
+      return;
+    }
+
+    const checkpoints = state.routeConfig.checkpoints || [];
+    const finishCp = checkpoints[checkpoints.length - 1] || { name: 'Finish Gate', distFromPrevKm: 0 };
+    const totalDist = state.routeConfig.totalDistanceKm || 0;
+
+    for (const p of eligible) {
+      recordStateSnapshot(p);
+      const totalMs = Math.max(0, now - p.startTime);
+      const overall = TrailTimer.calculateOverall(totalMs, totalDist);
+      const prevTimestamp = (p.splits && p.splits.length > 0) ? p.splits[p.splits.length - 1].timestamp : p.startTime;
+      const lastSplitData = TrailTimer.calculateSplit(prevTimestamp, now, finishCp.distFromPrevKm || 0);
+
+      const finishSplitRecord = {
+        cpIndex: checkpoints.length - 1,
+        cpName: finishCp.name,
+        timestamp: now,
+        splitMs: lastSplitData.splitMs,
+        splitFormatted: lastSplitData.splitFormatted,
+        cumulativeMs: totalMs,
+        paceFormatted: lastSplitData.paceFormatted,
+        speedFormatted: lastSplitData.speedFormatted
+      };
+
+      if (!p.splits) p.splits = [];
+      p.splits.push(finishSplitRecord);
+
+      p.status = 'finished';
+      p.finishTime = now;
+      p.totalMs = totalMs;
+      p.avgPace = overall.paceFormatted;
+      p.avgSpeed = overall.speedFormatted;
+      await TrailDB.saveParticipant(p);
+
+      await TrailDB.addTimingLog({
+        bib: p.bib,
+        participant_name: p.name,
+        category: p.category,
+        action: 'FINISH',
+        checkpoint_index: checkpoints.length - 1,
+        checkpoint_name: finishCp.name,
+        timestamp: now,
+        device_timestamp: new Date(now).toISOString(),
+        elapsed_ms: totalMs,
+        split_ms: lastSplitData.splitMs,
+        pace: overall.paceFormatted,
+        speed: overall.speedFormatted
+      });
+    }
+
+    updateSyncBadge();
+    await refreshParticipants();
+    showToast(`🏁 FINISH: Seluruh ${eligible.length} pelari (${label}) berhasil Finish bersamaan!`, 'success');
+  }
+
+  // Trigger auto sync jika online
   if (navigator.onLine && state.syncEngine) {
     state.syncEngine.syncNow();
   }
 }
 
-// --- QUICK BIB NUMPAD / FAST ENTRY ---
+// 6. Mass Start
+async function executeMassStart() {
+  const selectCat = document.getElementById('massStartCategory');
+  const selectedCat = selectCat ? selectCat.value : 'ALL';
+  const selectTeam = document.getElementById('massStartTeam');
+  const selectedTeam = selectTeam ? selectTeam.value : 'ALL';
+
+  let targets = state.participants.filter(p => p.status === 'dns');
+  if (selectedCat !== 'ALL') {
+    targets = targets.filter(p => p.category === selectedCat);
+  }
+  if (selectedTeam !== 'ALL') {
+    targets = targets.filter(p => p.team === selectedTeam);
+  }
+
+  if (targets.length === 0) {
+    showToast('Tidak ada pelari dengan status "Belum Start" di filter ini.', 'info');
+    closeModal('modalMassStart');
+    return;
+  }
+
+  closeModal('modalMassStart');
+  const label = selectedTeam !== 'ALL' ? `Grup ${selectedTeam}` : (selectedCat !== 'ALL' ? selectedCat : 'Semua Pelari');
+  await handleMassActionOnTargets(targets, 'START', { label });
+}
+
+// 7. Mass CP from Modal
+async function executeMassCpFromModal() {
+  const teamVal = document.getElementById('massCpTeam')?.value || 'ALL';
+  const catVal = document.getElementById('massCpCategory')?.value || 'ALL';
+
+  let targets = state.participants.filter(p => p.status === 'running' || p.status === 'dns');
+  if (teamVal !== 'ALL') {
+    targets = targets.filter(p => p.team === teamVal);
+  }
+  if (catVal !== 'ALL') {
+    targets = targets.filter(p => p.category === catVal);
+  }
+
+  if (targets.length === 0) {
+    showToast('Tidak ada pelari aktif yang cocok dengan pilihan tersebut.', 'info');
+    return;
+  }
+
+  closeModal('modalMassCp');
+  const label = teamVal !== 'ALL' ? `Grup ${teamVal}` : (catVal !== 'ALL' ? catVal : 'Semua Pelari');
+  await handleMassActionOnTargets(targets, 'CP', { label });
+}
+
+// 8. Mass Finish from Modal
+async function executeMassFinishFromModal() {
+  const teamVal = document.getElementById('massFinishTeam')?.value || 'ALL';
+  const catVal = document.getElementById('massFinishCategory')?.value || 'ALL';
+
+  let targets = state.participants.filter(p => p.status === 'running');
+  if (teamVal !== 'ALL') {
+    targets = targets.filter(p => p.team === teamVal);
+  }
+  if (catVal !== 'ALL') {
+    targets = targets.filter(p => p.category === catVal);
+  }
+
+  if (targets.length === 0) {
+    showToast('Tidak ada pelari berstatus Berlari yang cocok dengan pilihan tersebut.', 'info');
+    return;
+  }
+
+  closeModal('modalMassFinish');
+  const label = teamVal !== 'ALL' ? `Grup ${teamVal}` : (catVal !== 'ALL' ? catVal : 'Semua Pelari');
+  await handleMassActionOnTargets(targets, 'FINISH', { label });
+}
+
+// --- QUICK BIB & GROUP NUMPAD / FAST ENTRY ---
 function initQuickPuncher() {
   const bibInput = document.getElementById('quickBibInput');
   const btnCp = document.getElementById('btnQuickCp');
   const btnFinish = document.getElementById('btnQuickFinish');
   const btnStart = document.getElementById('btnQuickStart');
 
-  const getBib = () => {
+  const getResolved = () => {
     const val = bibInput.value.trim();
     if (!val) {
-      showToast('Masukkan nomor BIB terlebih dahulu!', 'info');
+      showToast('Masukkan nomor BIB atau Nama Grup terlebih dahulu!', 'info');
       bibInput.focus();
       return null;
     }
-    return val;
+    const targets = resolvePunchTargets(val);
+    if (!targets || targets.length === 0) {
+      showToast(`Tidak ditemukan pelari/grup dengan kata kunci: "${val}"`, 'error');
+      bibInput.focus();
+      return null;
+    }
+    return { val, targets };
   };
 
-  btnCp.addEventListener('click', () => {
-    const bib = getBib();
-    if (!bib) return;
-    if (state.userRole === 'marshal' && state.stationName && !state.stationName.includes('Master')) {
-      handlePunchSpecificCheckpoint(bib, state.stationName);
+  btnCp.addEventListener('click', async () => {
+    const res = getResolved();
+    if (!res) return;
+    if (res.targets.length === 1) {
+      const bib = res.targets[0].bib;
+      if (state.userRole === 'marshal' && state.stationName && !state.stationName.includes('Master')) {
+        await handlePunchSpecificCheckpoint(bib, state.stationName);
+      } else {
+        await handlePunchCheckpoint(bib);
+      }
     } else {
-      handlePunchCheckpoint(bib);
+      await handleMassActionOnTargets(res.targets, 'CP', { label: res.val });
     }
     bibInput.value = '';
     bibInput.focus();
   });
 
-  btnFinish.addEventListener('click', () => {
-    const bib = getBib();
-    if (!bib) return;
-    handleFinishRunner(bib);
+  btnFinish.addEventListener('click', async () => {
+    const res = getResolved();
+    if (!res) return;
+    if (res.targets.length === 1) {
+      await handleFinishRunner(res.targets[0].bib);
+    } else {
+      await handleMassActionOnTargets(res.targets, 'FINISH', { label: res.val });
+    }
     bibInput.value = '';
     bibInput.focus();
   });
 
-  btnStart.addEventListener('click', () => {
-    const bib = getBib();
-    if (!bib) return;
-    handleStartRunner(bib);
+  btnStart.addEventListener('click', async () => {
+    const res = getResolved();
+    if (!res) return;
+    if (res.targets.length === 1) {
+      await handleStartRunner(res.targets[0].bib);
+    } else {
+      await handleMassActionOnTargets(res.targets, 'START', { label: res.val });
+    }
     bibInput.value = '';
     bibInput.focus();
   });
 
-  bibInput.addEventListener('keydown', (e) => {
+  bibInput.addEventListener('keydown', async (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      const bib = getBib();
-      if (!bib) return;
+      const res = getResolved();
+      if (!res) return;
 
-      if (state.userRole === 'marshal') {
-        const cur = (state.stationName || '').toLowerCase();
-        if (cur.includes('start')) {
-          handleStartRunner(bib);
-        } else if (cur.includes('finish')) {
-          handleFinishRunner(bib);
-        } else {
-          handlePunchSpecificCheckpoint(bib, state.stationName);
-        }
-      } else {
-        // Admin behavior
-        const runner = state.participants.find(p => String(p.bib) === String(bib));
-        if (!runner || runner.status === 'dns') {
-          handleStartRunner(bib);
-        } else if (runner.status === 'running') {
-          const nextCpIndex = (runner.splits || []).length + 1;
-          const totalCps = (state.routeConfig.checkpoints || []).length;
-          if (nextCpIndex >= totalCps - 1) {
-            handleFinishRunner(bib);
+      if (res.targets.length === 1) {
+        const runner = res.targets[0];
+        const bib = runner.bib;
+        if (state.userRole === 'marshal') {
+          const cur = (state.stationName || '').toLowerCase();
+          if (cur.includes('start')) {
+            await handleStartRunner(bib);
+          } else if (cur.includes('finish')) {
+            await handleFinishRunner(bib);
           } else {
-            handlePunchCheckpoint(bib);
+            await handlePunchSpecificCheckpoint(bib, state.stationName);
           }
         } else {
-          showToast(`BIB #${bib} sudah selesai/berstatus ${runner.status}.`, 'info');
+          // Admin behavior
+          if (runner.status === 'dns') {
+            await handleStartRunner(bib);
+          } else if (runner.status === 'running') {
+            const nextCpIndex = (runner.splits || []).length + 1;
+            const totalCps = (state.routeConfig.checkpoints || []).length;
+            if (nextCpIndex >= totalCps - 1) {
+              await handleFinishRunner(bib);
+            } else {
+              await handlePunchCheckpoint(bib);
+            }
+          } else {
+            showToast(`BIB #${bib} sudah selesai/berstatus ${runner.status}.`, 'info');
+          }
+        }
+      } else {
+        // Multiple runners in group: Auto-detect action
+        const anyRunning = res.targets.some(p => p.status === 'running');
+        if (anyRunning) {
+          const cur = (state.stationName || '').toLowerCase();
+          if (cur.includes('finish')) {
+            await handleMassActionOnTargets(res.targets, 'FINISH', { label: res.val });
+          } else {
+            await handleMassActionOnTargets(res.targets, 'CP', { label: res.val });
+          }
+        } else {
+          await handleMassActionOnTargets(res.targets, 'START', { label: res.val });
         }
       }
       bibInput.value = '';
@@ -1233,13 +1539,22 @@ async function processBulkImport() {
     let cols = line.split(/[,\t;]/).map(s => s.trim().replace(/^["']|["']$/g, ''));
     if (cols.length < 2) continue;
 
-    const bib = cols[0];
-    const name = cols[1];
-    const category = cols[2] || 'Trail';
-    const team = cols[3] || '';
+    let bib = cols[0];
+    let name = cols[1];
+    let category = cols[2] || 'Trail';
+    let team = cols[3] || '';
+
+    // Deteksi cerdas: Jika user meng-copy 3 kolom dari Excel [Nama, Kategori, Tim] tanpa kolom BIB:
+    // Contoh: cols[0] = "Andi Wijaya" (nama orang), cols[1] = "AAG Run", cols[2] = "Grup 1"
+    if (cols.length === 3 && isNaN(parseInt(bib, 10))) {
+      team = cols[2];
+      category = cols[1];
+      name = cols[0];
+      bib = String(100 + existingBibs.size + 1);
+    }
 
     // Check if header line
-    if (bib.toLowerCase() === 'bib' || bib.toLowerCase() === 'nomor') {
+    if (bib.toLowerCase() === 'bib' || bib.toLowerCase() === 'nomor' || (name && name.toLowerCase().includes('nama'))) {
       continue;
     }
 
@@ -1635,8 +1950,55 @@ function populateCategoryDropdowns() {
     massSelect.innerHTML = ['<option value="ALL">Semua Kategori</option>', ...state.categories.map(c => `<option value="${c}">${c}</option>`)].join('');
   }
 
+  const massCpCat = document.getElementById('massCpCategory');
+  if (massCpCat) {
+    massCpCat.innerHTML = ['<option value="ALL">Semua Kategori</option>', ...state.categories.map(c => `<option value="${c}">${c}</option>`)].join('');
+  }
+
+  const massFinishCat = document.getElementById('massFinishCategory');
+  if (massFinishCat) {
+    massFinishCat.innerHTML = ['<option value="ALL">Semua Kategori</option>', ...state.categories.map(c => `<option value="${c}">${c}</option>`)].join('');
+  }
+
   if (datalist) {
     datalist.innerHTML = state.categories.map(c => `<option value="${c}"></option>`).join('');
+  }
+}
+
+// --- UTILITIES: TEAMS / GROUPS DROPDOWNS ---
+function updateTeamsList() {
+  const teamsSet = new Set();
+  for (const p of state.participants) {
+    if (p.team && p.team.trim()) {
+      teamsSet.add(p.team.trim());
+    }
+  }
+  state.teams = Array.from(teamsSet).sort((a, b) => a.localeCompare(b));
+  populateTeamDropdowns();
+}
+
+function populateTeamDropdowns() {
+  const filterTeam = document.getElementById('filterTeam');
+  if (filterTeam) {
+    const currentVal = state.selectedTeam || 'Semua';
+    const opts = ['<option value="Semua">Semua Grup/Tim</option>', ...state.teams.map(t => `<option value="${t}">${t}</option>`)];
+    filterTeam.innerHTML = opts.join('');
+    filterTeam.value = state.teams.includes(currentVal) ? currentVal : 'Semua';
+  }
+
+  const massStartTeam = document.getElementById('massStartTeam');
+  if (massStartTeam) {
+    massStartTeam.innerHTML = ['<option value="ALL">Semua Grup/Tim</option>', ...state.teams.map(t => `<option value="${t}">${t}</option>`)].join('');
+  }
+
+  const massCpTeam = document.getElementById('massCpTeam');
+  if (massCpTeam) {
+    massCpTeam.innerHTML = ['<option value="ALL">Semua Grup/Tim</option>', ...state.teams.map(t => `<option value="${t}">${t}</option>`)].join('');
+  }
+
+  const massFinishTeam = document.getElementById('massFinishTeam');
+  if (massFinishTeam) {
+    massFinishTeam.innerHTML = ['<option value="ALL">Semua Grup/Tim</option>', ...state.teams.map(t => `<option value="${t}">${t}</option>`)].join('');
   }
 }
 
@@ -1869,6 +2231,41 @@ function initEventListeners() {
     });
   }
 
+  // Filter Team / Group Dropdown
+  const filterTeam = document.getElementById('filterTeam');
+  if (filterTeam) {
+    filterTeam.addEventListener('change', (e) => {
+      state.selectedTeam = e.target.value;
+      filterParticipants();
+      renderParticipantCards();
+    });
+  }
+
+  // Group Action Bar Buttons
+  const btnGroupCp = document.getElementById('btnGroupMassCp');
+  if (btnGroupCp) {
+    btnGroupCp.addEventListener('click', async () => {
+      const title = document.getElementById('groupActionTitle')?.textContent || 'Grup Terpilih';
+      await handleMassActionOnTargets(state.filteredParticipants, 'CP', { label: title });
+    });
+  }
+
+  const btnGroupFinish = document.getElementById('btnGroupMassFinish');
+  if (btnGroupFinish) {
+    btnGroupFinish.addEventListener('click', async () => {
+      const title = document.getElementById('groupActionTitle')?.textContent || 'Grup Terpilih';
+      await handleMassActionOnTargets(state.filteredParticipants, 'FINISH', { label: title });
+    });
+  }
+
+  const btnGroupStart = document.getElementById('btnGroupMassStart');
+  if (btnGroupStart) {
+    btnGroupStart.addEventListener('click', async () => {
+      const title = document.getElementById('groupActionTitle')?.textContent || 'Grup Terpilih';
+      await handleMassActionOnTargets(state.filteredParticipants, 'START', { label: title });
+    });
+  }
+
   // Leaderboard Category Filter
   const lbCat = document.getElementById('leaderboardCategoryFilter');
   if (lbCat) {
@@ -1902,6 +2299,26 @@ function initEventListeners() {
   const btnConfirmMass = document.getElementById('btnConfirmMassStart');
   if (btnConfirmMass) {
     btnConfirmMass.addEventListener('click', executeMassStart);
+  }
+
+  const btnOpenCpModal = document.getElementById('btnOpenMassCp');
+  if (btnOpenCpModal) {
+    btnOpenCpModal.addEventListener('click', () => openModal('modalMassCp'));
+  }
+
+  const btnConfirmCpModal = document.getElementById('btnConfirmMassCp');
+  if (btnConfirmCpModal) {
+    btnConfirmCpModal.addEventListener('click', executeMassCpFromModal);
+  }
+
+  const btnOpenFinishModal = document.getElementById('btnOpenMassFinish');
+  if (btnOpenFinishModal) {
+    btnOpenFinishModal.addEventListener('click', () => openModal('modalMassFinish'));
+  }
+
+  const btnConfirmFinishModal = document.getElementById('btnConfirmMassFinish');
+  if (btnConfirmFinishModal) {
+    btnConfirmFinishModal.addEventListener('click', executeMassFinishFromModal);
   }
 
   const btnOpenImport = document.getElementById('btnOpenImportModal');
