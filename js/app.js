@@ -172,6 +172,13 @@ async function loadInitialSettings() {
   const nameParam = urlParams.get('name') || urlParams.get('marshal');
   const backendParam = urlParams.get('backend') || urlParams.get('api');
 
+  const resetParam = urlParams.get('reset') || urlParams.get('clean');
+  if (resetParam === '1' || resetParam === 'true') {
+    console.log('[TrailTimer] Parameter reset terdeteksi di link, membersihkan riwayat & data lokal...');
+    await TrailDB.clearAllParticipants();
+    await TrailDB.clearAllTimingLogs();
+  }
+
   // 1. Jika URL menyertakan rute dari Admin, langsung terapkan & simpan ke IndexedDB HP
   if (routeParam) {
     const parsedRoute = parseRouteFromUrlParam(routeParam);
@@ -728,7 +735,7 @@ function renderParticipantCards() {
             actionButtonsHtml = `
               <button class="btn btn-cp btn-sm" onclick="handlePunchSpecificCheckpoint('${p.bib}', '${currentStationName}')" title="Catat tiba di ${currentStationName}">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                ✓ PUNCH ${currentStationName.toUpperCase()}
+                PUNCH ${currentStationName.toUpperCase()}
               </button>
               <button class="btn btn-finish btn-sm" onclick="handleFinishRunner('${p.bib}')">
                 FINISH
@@ -2199,10 +2206,9 @@ async function handleManualSync() {
   if (btn) btn.classList.remove('loading');
   if (manualBtn) manualBtn.classList.remove('loading');
 
+  await refreshParticipants();
+
   if (result.success) {
-    if (result.pullCount > 0) {
-      await refreshParticipants();
-    }
     showToast(result.message, (result.count > 0 || result.pullCount > 0) ? 'success' : 'info');
   } else {
     showToast(result.message, 'error');
@@ -2564,10 +2570,13 @@ function renderMarshalLinkGenerator() {
           <strong style="color: #fff; font-size: 0.95rem;">${icon} ${cp.name}</strong>
           <span class="brand-tag">${cp.distFromPrevKm || 0} KM</span>
         </div>
-        <div style="display: flex; gap: 8px;">
-          <input type="text" class="form-input" value="${link}" readonly style="font-size: 0.75rem; font-family: var(--font-mono); opacity: 0.8; padding: 6px 10px;">
+        <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+          <input type="text" class="form-input" value="${link}" readonly style="font-size: 0.75rem; font-family: var(--font-mono); opacity: 0.8; padding: 6px 10px; flex: 1; min-width: 180px;">
           <button type="button" class="btn btn-outline btn-sm" onclick="copyToClipboard('${link}')" title="Salin Link Pos">
             Salin Link
+          </button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="copyToClipboard('${link}&reset=1')" title="Salin Link Pos sekaligus membersihkan cache riwayat lomba lama di HP petugas" style="color: #fbbf24; border-color: rgba(245, 158, 11, 0.4);">
+            Salin + Reset Cache
           </button>
           <a href="https://api.whatsapp.com/send?text=${waMsg}" target="_blank" class="btn btn-accent btn-sm" style="text-decoration: none;" title="Bagikan ke WhatsApp">
             Kirim WhatsApp
@@ -2888,6 +2897,28 @@ function initEventListeners() {
         showToast('PIN Admin salah!', 'error');
       }
       if (input) input.value = '';
+    });
+  }
+
+  // Quick Action from PIN Modal (Bisa diakses dari Mode Petugas Pos)
+  const btnSyncModal = document.getElementById('btnQuickSyncFromModal');
+  if (btnSyncModal) {
+    btnSyncModal.addEventListener('click', async () => {
+      closeModal('modalAdminPin');
+      await handleManualSync();
+    });
+  }
+
+  const btnClearModal = document.getElementById('btnQuickClearCacheFromModal');
+  if (btnClearModal) {
+    btnClearModal.addEventListener('click', async () => {
+      if (confirm('Konfirmasi: Bersihkan seluruh data peserta dan riwayat timer lokal di perangkat ini?\n(Data di Google Sheets tetap aman)')) {
+        await TrailDB.clearAllParticipants();
+        await TrailDB.clearAllTimingLogs();
+        await refreshParticipants();
+        closeModal('modalAdminPin');
+        showToast('Seluruh cache dan data peserta di HP berhasil dibersihkan!', 'success');
+      }
     });
   }
 

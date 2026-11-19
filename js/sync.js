@@ -217,18 +217,22 @@ class TrailSync {
           const bib = String(sp.bib);
           if (localMap[bib]) {
             const lp = localMap[bib];
-            // Sinkronkan waktu start resmi agar timer identik di semua HP
-            if (sp.startTime) {
-              lp.startTime = sp.startTime;
-            }
-            if (sp.status && sp.status !== 'dns') {
-              lp.status = sp.status;
-            }
-            if (sp.finishTime) {
-              lp.finishTime = sp.finishTime;
-            }
-            if (sp.totalMs) {
-              lp.totalMs = sp.totalMs;
+            // Jika di Google Sheets statusnya 'dns' (belum start / lomba di-reset oleh admin):
+            if (sp.status === 'dns' || (!sp.startTime && !sp.status)) {
+              lp.status = 'dns';
+              lp.startTime = null;
+              lp.finishTime = null;
+              lp.totalMs = null;
+              lp.splits = [];
+              lp.avgPace = null;
+              lp.avgSpeed = null;
+              lp.history = [];
+            } else {
+              // Status resmi server (running atau finished)
+              if (sp.startTime) lp.startTime = sp.startTime;
+              if (sp.status) lp.status = sp.status;
+              if (sp.finishTime) lp.finishTime = sp.finishTime;
+              if (sp.totalMs) lp.totalMs = sp.totalMs;
             }
             lp.name = sp.name || lp.name;
             lp.category = sp.category || lp.category;
@@ -241,11 +245,11 @@ class TrailSync {
           }
         }
 
-        // Hapus peserta lokal yang berstatus DNS jika sudah dihapus dari Google Sheets (Mirroring Peserta Belum Start)
+        // Hapus peserta lokal jika sudah dihapus dari Google Sheets
         const serverBibs = new Set(data.participants.map(sp => String(sp.bib)));
         for (const lp of localList) {
           const bibStr = String(lp.bib);
-          if ((!lp.status || lp.status === 'dns') && !serverBibs.has(bibStr)) {
+          if (!serverBibs.has(bibStr)) {
             delete localMap[bibStr];
             await TrailDB.deleteParticipant(lp.bib);
           }
@@ -258,11 +262,19 @@ class TrailSync {
           message: `Berhasil sinkronkan ${data.participants.length} peserta dari server Google Sheets!`
         };
       } else {
+        // Database Google Sheets KOSONG (0 peserta)
+        const localList = await TrailDB.getAllParticipants();
+        if (localList.length > 0) {
+          console.log('[TrailSync] Google Sheets kosong, membersihkan ' + localList.length + ' peserta lokal...');
+          await TrailDB.clearAllParticipants();
+          await TrailDB.clearAllTimingLogs();
+          if (typeof refreshParticipants === 'function') await refreshParticipants();
+        }
         return {
           success: true,
           count: 0,
           isEmptySheet: true,
-          message: 'Lembar peserta di Google Sheets kosong (0 peserta).'
+          message: 'Database Google Sheets kosong. Data di HP telah dikosongkan mengikuti server.'
         };
       }
     } catch (err) {

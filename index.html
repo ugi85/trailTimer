@@ -819,6 +819,18 @@
           <input type="password" id="dialogPinInput" class="form-input" placeholder="PIN" maxlength="8"
             inputmode="numeric">
         </div>
+
+        <div style="border-top: 1px solid var(--border-color); margin-top: 15px; padding-top: 12px;">
+          <label class="form-label" style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 8px;">Opsi Pemulihan / Sinkronisasi Cepat di HP:</label>
+          <div style="display: flex; gap: 8px; flex-direction: column;">
+            <button id="btnQuickSyncFromModal" type="button" class="btn btn-outline btn-sm" style="width: 100%; justify-content: center;">
+              🔄 Tarik Ulang Data dari Google Sheets
+            </button>
+            <button id="btnQuickClearCacheFromModal" type="button" class="btn btn-danger btn-sm" style="width: 100%; justify-content: center; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171;">
+              🧹 Bersihkan Cache & Reset Data Lokal HP
+            </button>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline btn-sm" data-close="modalAdminPin">Batal</button>
