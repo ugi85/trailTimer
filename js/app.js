@@ -123,12 +123,9 @@ async function loadInitialSettings() {
   }
 
   if (stationParam) {
-    // Match with checkpoints
-    const matched = state.routeConfig.checkpoints.find(c => 
-      c.name.toLowerCase().includes(stationParam.toLowerCase()) ||
-      c.id.toLowerCase() === stationParam.toLowerCase()
-    );
-    if (matched) {
+    // Match with checkpoints using smart resolver
+    const matched = resolveCheckpointMatch(decodeURIComponent(stationParam));
+    if (matched && matched.name) {
       state.stationName = matched.name;
     } else {
       state.stationName = decodeURIComponent(stationParam);
@@ -406,6 +403,103 @@ function updateSummaryStats() {
   if (countDnf) countDnf.textContent = dnf;
 }
 
+// --- STATION & CHECKPOINT RESOLVERS ---
+
+// Cek apakah perangkat sedang ditugaskan di pos spesifik (bukan Pos Utama/Master)
+function isDeviceStationSpecific() {
+  const s = (state.stationName || '').trim().toLowerCase();
+  if (!s || s === 'pos utama' || s === 'pos utama / master' || s.includes('master') || s.includes('utama')) {
+    return false;
+  }
+  return true;
+}
+
+// Smart resolver untuk mencocokkan nama pos/station dengan konfigurasi checkpoint rute
+function resolveCheckpointMatch(stationName) {
+  const checkpoints = (state.routeConfig && Array.isArray(state.routeConfig.checkpoints)) ? state.routeConfig.checkpoints : [];
+  if (!stationName || typeof stationName !== 'string') {
+    const defaultCp = checkpoints[1] || { name: 'CP 1', distFromPrevKm: 0, cumulativeKm: 0 };
+    return { index: 1, cp: defaultCp, name: defaultCp.name, isStart: false, isFinish: false };
+  }
+
+  const sLower = stationName.trim().toLowerCase();
+
+  // 1. Cek jika Start
+  if (sLower.includes('start') || sLower.includes('mulai')) {
+    const startCp = checkpoints[0] || { name: 'Start Gate', distFromPrevKm: 0, cumulativeKm: 0 };
+    return { index: 0, cp: startCp, name: startCp.name, isStart: true, isFinish: false };
+  }
+
+  // 2. Cek jika Finish
+  if (sLower.includes('finish') || sLower.includes('selesai')) {
+    const fIndex = Math.max(0, checkpoints.length - 1);
+    const finishCp = checkpoints[fIndex] || { name: 'Finish Gate', distFromPrevKm: 0, cumulativeKm: 0 };
+    return { index: fIndex, cp: finishCp, name: finishCp.name, isStart: false, isFinish: true };
+  }
+
+  // 3. Exact match
+  const exactIdx = checkpoints.findIndex(c => c.name.toLowerCase() === sLower);
+  if (exactIdx >= 0) {
+    return {
+      index: exactIdx,
+      cp: checkpoints[exactIdx],
+      name: checkpoints[exactIdx].name,
+      isStart: exactIdx === 0,
+      isFinish: exactIdx === (checkpoints.length - 1)
+    };
+  }
+
+  // 4. Pencocokan Angka (misal 'CP POS 2' atau 'Pos 2' -> cocok dengan 'CP 2 Puncak')
+  const numMatch = sLower.match(/\b(?:cp|pos)?\s*(\d+)\b/) || sLower.match(/(\d+)/);
+  if (numMatch) {
+    const stationNum = parseInt(numMatch[1], 10);
+    const numIdx = checkpoints.findIndex(c => {
+      const cMatch = c.name.toLowerCase().match(/\b(?:cp|pos)?\s*(\d+)\b/) || c.name.toLowerCase().match(/(\d+)/);
+      return cMatch && parseInt(cMatch[1], 10) === stationNum;
+    });
+    if (numIdx >= 0) {
+      return {
+        index: numIdx,
+        cp: checkpoints[numIdx],
+        name: checkpoints[numIdx].name,
+        isStart: numIdx === 0,
+        isFinish: numIdx === (checkpoints.length - 1)
+      };
+    }
+    // Jika tidak ada di nama, tetapi nomornya berada di checkpoint perantara (1 s/d length-2)
+    if (stationNum < checkpoints.length - 1 && stationNum > 0) {
+      return {
+        index: stationNum,
+        cp: checkpoints[stationNum],
+        name: checkpoints[stationNum].name,
+        isStart: false,
+        isFinish: false
+      };
+    }
+  }
+
+  // 5. Pencocokan Substring
+  const subIdx = checkpoints.findIndex(c => c.name.toLowerCase().includes(sLower) || sLower.includes(c.name.toLowerCase()));
+  if (subIdx >= 0) {
+    return {
+      index: subIdx,
+      cp: checkpoints[subIdx],
+      name: checkpoints[subIdx].name,
+      isStart: subIdx === 0,
+      isFinish: subIdx === (checkpoints.length - 1)
+    };
+  }
+
+  // Fallback jika pos custom belum ada di rute
+  return {
+    index: 1,
+    cp: { name: stationName, distFromPrevKm: 0, cumulativeKm: 0 },
+    name: stationName,
+    isStart: false,
+    isFinish: false
+  };
+}
+
 // --- RENDER PARTICIPANT CARDS ---
 function renderParticipantCards() {
   const container = document.getElementById('participantGrid');
@@ -430,12 +524,23 @@ function renderParticipantCards() {
   }
 
   const checkpoints = state.routeConfig.checkpoints || [];
+  const isStationSpecific = isDeviceStationSpecific();
+  const stationMatch = isStationSpecific ? resolveCheckpointMatch(state.stationName) : null;
+  const currentStationName = stationMatch ? stationMatch.name : (state.stationName || '');
+  const currentStationIdx = stationMatch ? stationMatch.index : -1;
 
   container.innerHTML = state.filteredParticipants.map(p => {
     const splits = p.splits || [];
     const nextCpIndex = splits.length + 1;
     const nextCp = checkpoints[nextCpIndex] || null;
     const isLastSegmentBeforeFinish = nextCpIndex === (checkpoints.length - 1);
+
+    // Cek apakah peserta sudah pernah di-punch di pos yang sedang aktif pada device ini
+    const alreadyAtCurrentStation = isStationSpecific && splits.some(s => 
+      s.cpIndex === currentStationIdx || 
+      (s.cpName && s.cpName.toLowerCase() === currentStationName.toLowerCase()) ||
+      (s.cpName && s.cpName.toLowerCase() === (state.stationName || '').toLowerCase())
+    );
 
     // Status Label & Tag
     let statusLabel = 'Belum Start';
@@ -469,44 +574,139 @@ function renderParticipantCards() {
       lastSplitTime = lastSplit.splitFormatted || TrailTimer.formatElapsed(lastSplit.splitMs);
       lastPace = lastSplit.paceFormatted || '-';
     } else if (p.status === 'running') {
-      lastCpName = 'Menuju CP 1';
+      if (isStationSpecific) {
+        lastCpName = alreadyAtCurrentStation ? currentStationName : `Menuju ${currentStationName}`;
+      } else {
+        lastCpName = nextCp ? `Menuju ${nextCp.name}` : 'Menuju Finish';
+      }
     }
 
-    // Action buttons based on status
+    // Action buttons based on station assignment and status
     let actionButtonsHtml = '';
-    if (p.status === 'dns') {
-      actionButtonsHtml = `
-        <button class="btn btn-start btn-sm" onclick="handleStartRunner('${p.bib}')">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
-          MULAI / START
-        </button>
-      `;
-    } else if (p.status === 'running') {
-      if (nextCp && !isLastSegmentBeforeFinish) {
+
+    if (isStationSpecific) {
+      // --- MODE POS SPESIFIK (PETUGAS CP 1, CP 2, CP 3, START, ATAU FINISH) ---
+      if (stationMatch && stationMatch.isStart) {
+        if (p.status === 'dns') {
+          actionButtonsHtml = `
+            <button class="btn btn-start btn-sm" onclick="handleStartRunner('${p.bib}')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              MULAI / START
+            </button>
+          `;
+        } else {
+          actionButtonsHtml = `
+            <button class="btn btn-sm" disabled style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); cursor: default; font-weight: 600;">
+              ✓ Sudah Start
+            </button>
+          `;
+          if (p.status === 'running') {
+            actionButtonsHtml += `
+              <button class="btn btn-danger btn-sm" onclick="handleDnfRunner('${p.bib}')" title="Tandai DNF">
+                DNF
+              </button>
+            `;
+          }
+        }
+      } else if (stationMatch && stationMatch.isFinish) {
+        if (p.status === 'running') {
+          actionButtonsHtml = `
+            <button class="btn btn-finish btn-sm" onclick="handleFinishRunner('${p.bib}')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
+              FINISH / STOP
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="handleDnfRunner('${p.bib}')" title="Tandai DNF">
+              DNF
+            </button>
+          `;
+        } else if (p.status === 'finished') {
+          actionButtonsHtml = `
+            <button class="btn btn-sm" disabled style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); cursor: default; font-weight: 600;">
+              ✓ Selesai Finish
+            </button>
+          `;
+        } else if (p.status === 'dns') {
+          actionButtonsHtml = `
+            <button class="btn btn-start btn-sm" onclick="handleStartRunner('${p.bib}')">
+              MULAI / START
+            </button>
+          `;
+        }
+      } else {
+        // Pos Checkpoint Lapangan (CP 1, CP 2, CP 3, etc.)
+        if (p.status === 'running' || p.status === 'dns') {
+          if (alreadyAtCurrentStation) {
+            actionButtonsHtml = `
+              <button class="btn btn-sm" disabled style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); cursor: default; font-weight: 600;">
+                ✓ Sudah di ${currentStationName}
+              </button>
+              <button class="btn btn-finish btn-sm" onclick="handleFinishRunner('${p.bib}')" title="Finish di pos ini jika rute dipersingkat">
+                FINISH
+              </button>
+              <button class="btn btn-danger btn-sm" onclick="handleDnfRunner('${p.bib}')" title="Tandai DNF di pos ini">
+                DNF
+              </button>
+            `;
+          } else {
+            actionButtonsHtml = `
+              <button class="btn btn-cp btn-sm" onclick="handlePunchSpecificCheckpoint('${p.bib}', '${currentStationName}')" title="Catat tiba di ${currentStationName}">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                ✓ PUNCH ${currentStationName.toUpperCase()}
+              </button>
+              <button class="btn btn-finish btn-sm" onclick="handleFinishRunner('${p.bib}')">
+                FINISH
+              </button>
+              <button class="btn btn-danger btn-sm" onclick="handleDnfRunner('${p.bib}')" title="Tandai DNF di pos ini">
+                DNF
+              </button>
+            `;
+          }
+        } else if (p.status === 'finished') {
+          actionButtonsHtml = `
+            <button class="btn btn-sm" disabled style="opacity: 0.6; cursor: default;">Telah Finish</button>
+          `;
+        } else if (p.status === 'dnf') {
+          actionButtonsHtml = `
+            <button class="btn btn-sm" disabled style="opacity: 0.6; cursor: default;">Status DNF</button>
+          `;
+        }
+      }
+    } else {
+      // --- MODE POS UTAMA / MASTER (BERURUTAN) ---
+      if (p.status === 'dns') {
         actionButtonsHtml = `
-          <button class="btn btn-cp btn-sm" onclick="handlePunchCheckpoint('${p.bib}')" title="Catat tiba di ${nextCp.name}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
-            PUNCH ${nextCp.name}
-          </button>
-          <button class="btn btn-finish btn-sm" onclick="handleFinishRunner('${p.bib}')">
-            FINISH
+          <button class="btn btn-start btn-sm" onclick="handleStartRunner('${p.bib}')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+            MULAI / START
           </button>
         `;
-      } else {
-        // Direct Finish button
-        actionButtonsHtml = `
-          <button class="btn btn-finish btn-sm" onclick="handleFinishRunner('${p.bib}')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
-            FINISH / STOP
+      } else if (p.status === 'running') {
+        if (nextCp && !isLastSegmentBeforeFinish) {
+          actionButtonsHtml = `
+            <button class="btn btn-cp btn-sm" onclick="handlePunchCheckpoint('${p.bib}')" title="Catat tiba di ${nextCp.name}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              PUNCH ${nextCp.name}
+            </button>
+            <button class="btn btn-finish btn-sm" onclick="handleFinishRunner('${p.bib}')">
+              FINISH
+            </button>
+          `;
+        } else {
+          // Direct Finish button
+          actionButtonsHtml = `
+            <button class="btn btn-finish btn-sm" onclick="handleFinishRunner('${p.bib}')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
+              FINISH / STOP
+            </button>
+          `;
+        }
+
+        actionButtonsHtml += `
+          <button class="btn btn-danger btn-sm" onclick="handleDnfRunner('${p.bib}')" title="Tandai DNF (Did Not Finish)">
+            DNF
           </button>
         `;
       }
-
-      actionButtonsHtml += `
-        <button class="btn btn-danger btn-sm" onclick="handleDnfRunner('${p.bib}')" title="Tandai DNF (Did Not Finish)">
-          DNF
-        </button>
-      `;
     }
 
     // Undo button (if history available)
@@ -708,7 +908,7 @@ async function handlePunchCheckpoint(bib, customTimestamp = null) {
   }
 }
 
-// 2b. Punch Specific Checkpoint (digunakan di Mode Petugas Pos Lapangan)
+// 2b. Punch Specific Checkpoint (digunakan di Mode Petugas Pos Lapangan & Pos Spesifik)
 async function handlePunchSpecificCheckpoint(bib, stationName, customTimestamp = null) {
   const p = await TrailDB.getParticipant(bib);
   if (!p) {
@@ -716,13 +916,32 @@ async function handlePunchSpecificCheckpoint(bib, stationName, customTimestamp =
     return;
   }
 
+  const targetMatch = resolveCheckpointMatch(stationName);
+  const cpObj = targetMatch.cp;
+  const targetIndex = targetMatch.index;
+  const targetName = targetMatch.name || stationName;
+
+  if (targetMatch.isStart) {
+    return await handleStartRunner(bib, customTimestamp);
+  }
+  if (targetMatch.isFinish) {
+    return await handleFinishRunner(bib, customTimestamp);
+  }
+
+  // Cek apakah peserta sudah pernah di-punch di pos ini pada perangkat ini (mencegah klik ganda)
+  const splits = p.splits || [];
+  const alreadyPunched = splits.some(s => 
+    s.cpIndex === targetIndex || 
+    (s.cpName && s.cpName.toLowerCase() === targetName.toLowerCase()) || 
+    (s.cpName && s.cpName.toLowerCase() === (stationName || '').toLowerCase())
+  );
+  if (alreadyPunched) {
+    showToast(`Peserta BIB #${bib} sudah dicatat di ${targetName}!`, 'info');
+    return;
+  }
+
   const now = customTimestamp || Date.now();
   recordStateSnapshot(p);
-
-  const checkpoints = state.routeConfig.checkpoints || [];
-  const cpIndex = checkpoints.findIndex(c => c.name.toLowerCase() === (stationName || '').toLowerCase());
-  const cpObj = (cpIndex >= 0) ? checkpoints[cpIndex] : { name: stationName, distFromPrevKm: 0 };
-  const targetIndex = (cpIndex >= 0) ? cpIndex : ((p.splits || []).length + 1);
 
   // Jika pelari belum start di sistem tapi sudah sampai di CP (misal gun time offline), auto-start
   if (p.status === 'dns') {
@@ -730,22 +949,33 @@ async function handlePunchSpecificCheckpoint(bib, stationName, customTimestamp =
     p.startTime = now;
   }
 
-  const splits = p.splits || [];
-  const prevTimestamp = (splits.length > 0) ? splits[splits.length - 1].timestamp : p.startTime;
-  const segmentDistKm = cpObj.distFromPrevKm || 0;
+  // Hitung jarak & pace split yang akurat:
+  // Jika perangkat offline di CP 2 tanpa catatan CP 1, jarak dihitung kumulatif dari Start
+  const lastSplit = splits.length > 0 ? splits[splits.length - 1] : null;
+  const prevTimestamp = lastSplit ? lastSplit.timestamp : p.startTime;
+  const prevDist = lastSplit ? (lastSplit.cumulativeKm || 0) : 0;
+
+  let segmentDistKm = 0;
+  if (cpObj.cumulativeKm && cpObj.cumulativeKm > prevDist) {
+    segmentDistKm = cpObj.cumulativeKm - prevDist;
+  } else {
+    segmentDistKm = cpObj.distFromPrevKm || 0;
+  }
+
   const splitData = TrailTimer.calculateSplit(prevTimestamp, now, segmentDistKm);
-  const elapsedTotalMs = now - p.startTime;
+  const elapsedTotalMs = Math.max(0, now - p.startTime);
 
   const splitRecord = {
     cpIndex: targetIndex,
-    cpName: cpObj.name,
+    cpName: targetName,
     timestamp: now,
     splitMs: splitData.splitMs,
     splitFormatted: splitData.splitFormatted,
     cumulativeMs: elapsedTotalMs,
     paceFormatted: splitData.paceFormatted,
     speedFormatted: splitData.speedFormatted,
-    distKm: segmentDistKm
+    distKm: segmentDistKm,
+    cumulativeKm: cpObj.cumulativeKm || (prevDist + segmentDistKm)
   };
 
   if (!p.splits) p.splits = [];
@@ -759,7 +989,7 @@ async function handlePunchSpecificCheckpoint(bib, stationName, customTimestamp =
     team: p.team || '',
     action: 'CP',
     checkpoint_index: targetIndex,
-    checkpoint_name: cpObj.name,
+    checkpoint_name: targetName,
     timestamp: now,
     device_timestamp: new Date(now).toISOString(),
     elapsed_ms: elapsedTotalMs,
@@ -770,7 +1000,7 @@ async function handlePunchSpecificCheckpoint(bib, stationName, customTimestamp =
 
   updateSyncBadge();
   await refreshParticipants();
-  showToast(`PUNCH: BIB #${p.bib} tiba di ${cpObj.name}! (${splitData.splitFormatted})`, 'success');
+  showToast(`PUNCH: BIB #${p.bib} tiba di ${targetName}! (${splitData.splitFormatted})`, 'success');
 
   if (navigator.onLine && state.syncEngine) {
     state.syncEngine.syncNow();
@@ -1038,15 +1268,32 @@ async function handleMassActionOnTargets(targets, actionType, options = {}) {
     showToast(`▶️ START: Berhasil memulai timer untuk ${eligible.length} pelari (${label})!`, 'success');
 
   } else if (actionType === 'CP') {
-    const eligible = targets.filter(p => p.status === 'running' || p.status === 'dns');
+    const isSpecific = isDeviceStationSpecific();
+    const stationMatch = isSpecific ? resolveCheckpointMatch(state.stationName) : null;
+    const targetName = stationMatch ? stationMatch.name : (state.stationName || 'Checkpoint');
+    const targetIndex = stationMatch ? stationMatch.index : -1;
+
+    // Filter eligible: pelari running atau dns yang belum di-punch di pos ini
+    const eligible = targets.filter(p => {
+      if (p.status !== 'running' && p.status !== 'dns') return false;
+      if (isSpecific) {
+        const splits = p.splits || [];
+        const alreadyAtPos = splits.some(s => 
+          s.cpIndex === targetIndex || 
+          (s.cpName && s.cpName.toLowerCase() === targetName.toLowerCase()) ||
+          (s.cpName && s.cpName.toLowerCase() === (state.stationName || '').toLowerCase())
+        );
+        return !alreadyAtPos;
+      }
+      return true;
+    });
+
     if (eligible.length === 0) {
-      showToast(`Tidak ada pelari aktif di ${label} untuk di-punch Checkpoint.`, 'info');
+      showToast(`Semua pelari di ${label} sudah dicatat di ${targetName} atau tidak aktif.`, 'info');
       return;
     }
 
     const checkpoints = state.routeConfig.checkpoints || [];
-    let stationName = state.stationName;
-    const isMarshal = (state.userRole === 'marshal' && stationName && !stationName.includes('Master'));
 
     for (const p of eligible) {
       if (p.status === 'dns') {
@@ -1055,25 +1302,34 @@ async function handleMassActionOnTargets(targets, actionType, options = {}) {
       }
       recordStateSnapshot(p);
 
-      let cpIndex, cpName, segmentDistKm;
-      if (isMarshal) {
-        const foundIdx = checkpoints.findIndex(c => c.name.toLowerCase() === stationName.toLowerCase());
-        cpIndex = (foundIdx >= 0) ? foundIdx : ((p.splits || []).length + 1);
-        cpName = stationName;
-        segmentDistKm = (foundIdx >= 0 && checkpoints[foundIdx].distFromPrevKm) ? checkpoints[foundIdx].distFromPrevKm : 0;
+      let cpIndex, cpName, segmentDistKm, cumDistKm;
+      const splits = p.splits || [];
+      const lastSplit = splits.length > 0 ? splits[splits.length - 1] : null;
+      const prevDist = lastSplit ? (lastSplit.cumulativeKm || 0) : 0;
+      const prevTimestamp = lastSplit ? lastSplit.timestamp : p.startTime;
+
+      if (isSpecific) {
+        cpIndex = targetIndex >= 0 ? targetIndex : (splits.length + 1);
+        cpName = targetName;
+        const cpObj = stationMatch ? stationMatch.cp : null;
+        if (cpObj && cpObj.cumulativeKm && cpObj.cumulativeKm > prevDist) {
+          segmentDistKm = cpObj.cumulativeKm - prevDist;
+          cumDistKm = cpObj.cumulativeKm;
+        } else {
+          segmentDistKm = cpObj ? (cpObj.distFromPrevKm || 0) : 0;
+          cumDistKm = prevDist + segmentDistKm;
+        }
       } else {
-        const splits = p.splits || [];
         cpIndex = splits.length + 1;
         if (cpIndex >= checkpoints.length) cpIndex = checkpoints.length - 1;
-        const currentCp = checkpoints[cpIndex] || { name: 'CP ' + cpIndex, distFromPrevKm: 0 };
+        const currentCp = checkpoints[cpIndex] || { name: 'CP ' + cpIndex, distFromPrevKm: 0, cumulativeKm: 0 };
         cpName = currentCp.name;
         segmentDistKm = currentCp.distFromPrevKm || 0;
+        cumDistKm = currentCp.cumulativeKm || (prevDist + segmentDistKm);
       }
 
-      const splits = p.splits || [];
-      const prevTimestamp = (splits.length > 0) ? splits[splits.length - 1].timestamp : p.startTime;
       const splitData = TrailTimer.calculateSplit(prevTimestamp, now, segmentDistKm);
-      const elapsedTotalMs = now - p.startTime;
+      const elapsedTotalMs = Math.max(0, now - p.startTime);
 
       const splitRecord = {
         cpIndex: cpIndex,
@@ -1084,7 +1340,8 @@ async function handleMassActionOnTargets(targets, actionType, options = {}) {
         cumulativeMs: elapsedTotalMs,
         paceFormatted: splitData.paceFormatted,
         speedFormatted: splitData.speedFormatted,
-        distKm: segmentDistKm
+        distKm: segmentDistKm,
+        cumulativeKm: cumDistKm
       };
 
       if (!p.splits) p.splits = [];
@@ -1110,7 +1367,7 @@ async function handleMassActionOnTargets(targets, actionType, options = {}) {
 
     updateSyncBadge();
     await refreshParticipants();
-    showToast(`📍 PUNCH CP: Berhasil mencatat ${eligible.length} pelari (${label}) tiba di Checkpoint!`, 'success');
+    showToast(`📍 PUNCH CP: Berhasil mencatat ${eligible.length} pelari (${label}) tiba di ${targetName}!`, 'success');
 
   } else if (actionType === 'FINISH') {
     const eligible = targets.filter(p => p.status === 'running');
@@ -1277,9 +1534,10 @@ function initQuickPuncher() {
   btnCp.addEventListener('click', async () => {
     const res = getResolved();
     if (!res) return;
+    const isSpecific = isDeviceStationSpecific();
     if (res.targets.length === 1) {
       const bib = res.targets[0].bib;
-      if (state.userRole === 'marshal' && state.stationName && !state.stationName.includes('Master')) {
+      if (isSpecific) {
         await handlePunchSpecificCheckpoint(bib, state.stationName);
       } else {
         await handlePunchCheckpoint(bib);
@@ -1321,20 +1579,23 @@ function initQuickPuncher() {
       const res = getResolved();
       if (!res) return;
 
+      const isSpecific = isDeviceStationSpecific();
+
       if (res.targets.length === 1) {
         const runner = res.targets[0];
         const bib = runner.bib;
-        if (state.userRole === 'marshal') {
-          const cur = (state.stationName || '').toLowerCase();
-          if (cur.includes('start')) {
+
+        if (isSpecific) {
+          const match = resolveCheckpointMatch(state.stationName);
+          if (match.isStart) {
             await handleStartRunner(bib);
-          } else if (cur.includes('finish')) {
+          } else if (match.isFinish) {
             await handleFinishRunner(bib);
           } else {
             await handlePunchSpecificCheckpoint(bib, state.stationName);
           }
         } else {
-          // Admin behavior
+          // Mode Pos Utama / Master
           if (runner.status === 'dns') {
             await handleStartRunner(bib);
           } else if (runner.status === 'running') {
@@ -1353,8 +1614,9 @@ function initQuickPuncher() {
         // Multiple runners in group: Auto-detect action
         const anyRunning = res.targets.some(p => p.status === 'running');
         if (anyRunning) {
-          const cur = (state.stationName || '').toLowerCase();
-          if (cur.includes('finish')) {
+          const isSpecific = isDeviceStationSpecific();
+          const match = isSpecific ? resolveCheckpointMatch(state.stationName) : null;
+          if (match && match.isFinish) {
             await handleMassActionOnTargets(res.targets, 'FINISH', { label: res.val });
           } else {
             await handleMassActionOnTargets(res.targets, 'CP', { label: res.val });
@@ -1809,6 +2071,9 @@ async function saveSyncSettings() {
     state.syncEngine.stationName = station;
   }
 
+  updateQuickPuncherForStation();
+  renderParticipantCards();
+
   showToast('Pengaturan backend & pos berhasil disimpan!', 'success');
 }
 
@@ -2059,6 +2324,7 @@ function populateStationDropdowns() {
     const settingInput = document.getElementById('settingStationName');
     if (settingInput) settingInput.value = val;
     updateQuickPuncherForStation();
+    renderParticipantCards();
     showToast(`Pos aktif diubah ke: ${val}`, 'info');
   };
 }
@@ -2092,6 +2358,7 @@ function setRole(role) {
     }
 
     updateQuickPuncherForStation();
+    renderParticipantCards();
 
     // If currently on hidden tab, switch to dashboard
     if (state.currentTab === 'viewSetup' || state.currentTab === 'viewSettings') {
@@ -2111,6 +2378,7 @@ function setRole(role) {
     if (stationSelect) stationSelect.disabled = false;
 
     updateQuickPuncherForStation();
+    renderParticipantCards();
     renderMarshalLinkGenerator();
   }
 }
@@ -2121,14 +2389,16 @@ function updateQuickPuncherForStation() {
   const btnStart = document.getElementById('btnQuickStart');
   if (!btnCp || !btnFinish || !btnStart) return;
 
-  const currentStation = (state.stationName || '').toLowerCase();
+  const isSpecific = isDeviceStationSpecific();
+  const target = isSpecific ? resolveCheckpointMatch(state.stationName) : null;
+  const targetName = target ? target.name : (state.stationName || '');
 
   if (state.userRole === 'marshal') {
-    if (currentStation.includes('start')) {
+    if (target && target.isStart) {
       btnStart.style.display = 'inline-flex';
       btnCp.style.display = 'none';
       btnFinish.style.display = 'none';
-    } else if (currentStation.includes('finish')) {
+    } else if (target && target.isFinish) {
       btnStart.style.display = 'none';
       btnCp.style.display = 'none';
       btnFinish.style.display = 'inline-flex';
@@ -2138,14 +2408,18 @@ function updateQuickPuncherForStation() {
       btnStart.style.display = 'none';
       btnFinish.style.display = 'none';
       btnCp.style.display = 'inline-flex';
-      btnCp.textContent = `PUNCH ${state.stationName.toUpperCase()}`;
+      btnCp.textContent = `PUNCH ${targetName.toUpperCase()}`;
     }
   } else {
     // Admin sees all actions
     btnStart.style.display = 'inline-flex';
     btnCp.style.display = 'inline-flex';
     btnFinish.style.display = 'inline-flex';
-    btnCp.textContent = 'PUNCH CP';
+    if (isSpecific) {
+      btnCp.textContent = `PUNCH ${targetName.toUpperCase()}`;
+    } else {
+      btnCp.textContent = 'PUNCH CP';
+    }
     btnFinish.textContent = 'FINISH';
     btnStart.textContent = 'START';
   }
@@ -2656,9 +2930,12 @@ async function loadDemoParticipants() {
 // Window exports for inline onclick handlers
 window.handleStartRunner = handleStartRunner;
 window.handlePunchCheckpoint = handlePunchCheckpoint;
+window.handlePunchSpecificCheckpoint = handlePunchSpecificCheckpoint;
 window.handleFinishRunner = handleFinishRunner;
 window.handleDnfRunner = handleDnfRunner;
 window.openUndoModal = openUndoModal;
 window.deleteSingleParticipant = deleteSingleParticipant;
 window.removeCheckpointRow = removeCheckpointRow;
 window.copyToClipboard = copyToClipboard;
+window.resolveCheckpointMatch = resolveCheckpointMatch;
+window.isDeviceStationSpecific = isDeviceStationSpecific;
