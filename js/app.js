@@ -45,6 +45,72 @@ function isValidCategoryName(cat) {
   return /^[a-zA-Z0-9\s\-\.\/\+()]{1,35}$/.test(s);
 }
 
+// Serialisasi rute ke string ringkas untuk dimasukkan ke link WhatsApp / Magic Link
+function serializeRouteForUrl(routeConfig) {
+  if (!routeConfig || !Array.isArray(routeConfig.checkpoints)) return '';
+  return routeConfig.checkpoints.map(c => `${c.name}:${c.distFromPrevKm || 0}`).join('|');
+}
+
+// Parse rute dari parameter URL (&route=... atau &cps=...)
+function parseRouteFromUrlParam(rawParam) {
+  if (!rawParam) return null;
+  try {
+    let decoded = rawParam;
+    try { decoded = decodeURIComponent(rawParam).trim(); } catch(e) {}
+    
+    // Format JSON
+    if (decoded.startsWith('[') || decoded.startsWith('{')) {
+      const parsed = JSON.parse(decoded);
+      if (Array.isArray(parsed)) {
+        let cum = 0;
+        const checkpoints = parsed.map((item, idx) => {
+          let name = `Pos ${idx}`;
+          let dist = 0;
+          if (Array.isArray(item)) {
+            name = String(item[0]);
+            dist = parseFloat(item[1]) || 0;
+          } else if (typeof item === 'object') {
+            name = item.name || `Pos ${idx}`;
+            dist = parseFloat(item.distFromPrevKm) || 0;
+          }
+          if (idx === 0) dist = 0;
+          cum += dist;
+          return {
+            id: (idx === 0) ? 'start' : ((idx === parsed.length - 1) ? 'finish' : `cp_${idx}`),
+            name,
+            distFromPrevKm: dist,
+            cumulativeKm: parseFloat(cum.toFixed(2))
+          };
+        });
+        return { checkpoints, totalDistanceKm: parseFloat(cum.toFixed(2)) };
+      }
+    }
+
+    // Format Pipe-Delimited: "Start Gate:0|CP Pos 1:1.5|CP Pos 2:1|Finish:1.5"
+    if (decoded.includes('|') || decoded.includes(':')) {
+      const segments = decoded.split('|').filter(s => s.trim().length > 0);
+      let cum = 0;
+      const checkpoints = segments.map((seg, idx) => {
+        const parts = seg.split(':');
+        const name = parts[0].trim();
+        let dist = parts.length > 1 ? (parseFloat(parts[1]) || 0) : 0;
+        if (idx === 0) dist = 0;
+        cum += dist;
+        return {
+          id: (idx === 0) ? 'start' : ((idx === segments.length - 1) ? 'finish' : `cp_${idx}`),
+          name,
+          distFromPrevKm: dist,
+          cumulativeKm: parseFloat(cum.toFixed(2))
+        };
+      });
+      return { checkpoints, totalDistanceKm: parseFloat(cum.toFixed(2)) };
+    }
+  } catch(e) {
+    console.warn('[TrailTimer] Gagal mem-parse parameter rute URL:', e);
+  }
+  return null;
+}
+
 // --- INITIALIZATION ---
 document.addEventListener('DOMContentLoaded', async () => {
   initServiceWorker();
@@ -98,12 +164,23 @@ async function loadInitialSettings() {
   const pinInput = document.getElementById('inputAdminPin');
   if (pinInput) pinInput.value = state.adminPin;
 
-  // Handle URL Parameters (Magic Links for Marshals)
+  // Handle URL Parameters (Magic Links for Marshals & Shared Route)
   const urlParams = new URLSearchParams(window.location.search);
+  const routeParam = urlParams.get('route') || urlParams.get('cps') || urlParams.get('rute');
   const stationParam = urlParams.get('station') || urlParams.get('pos');
   const roleParam = urlParams.get('role');
   const nameParam = urlParams.get('name') || urlParams.get('marshal');
   const backendParam = urlParams.get('backend') || urlParams.get('api');
+
+  // 1. Jika URL menyertakan rute dari Admin, langsung terapkan & simpan ke IndexedDB HP
+  if (routeParam) {
+    const parsedRoute = parseRouteFromUrlParam(routeParam);
+    if (parsedRoute && Array.isArray(parsedRoute.checkpoints) && parsedRoute.checkpoints.length > 0) {
+      state.routeConfig = parsedRoute;
+      await TrailDB.setSetting('route_config', parsedRoute);
+      console.log('[TrailTimer] Konfigurasi rute berhasil dimuat dari link admin:', parsedRoute);
+    }
+  }
 
   if (backendParam) {
     try {
@@ -1692,6 +1769,30 @@ function removeCheckpointRow(index) {
   renderRouteSetup();
 }
 
+// Kirim konfigurasi rute ke Google Sheets agar seluruh perangkat lain dapat menarik rute otomatis
+async function syncRouteConfigToCloud() {
+  const backendUrl = await TrailDB.getSetting('backend_url', state.backendUrl);
+  if (!backendUrl || !backendUrl.trim().startsWith('http') || !navigator.onLine) return;
+  try {
+    const payload = {
+      action: 'save_route_config',
+      device_id: state.deviceId,
+      station_name: state.stationName,
+      client_timestamp: new Date().toISOString(),
+      route: state.routeConfig
+    };
+    await fetch(backendUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      redirect: 'follow'
+    });
+    console.log('[TrailTimer] Rute berhasil disinkronkan ke Google Sheets.');
+  } catch(err) {
+    console.warn('[TrailTimer] Gagal mengirim rute ke Google Sheets:', err);
+  }
+}
+
 async function saveRouteConfigFromUI() {
   const rows = document.querySelectorAll('.cp-item');
   const updated = [];
@@ -1720,6 +1821,14 @@ async function saveRouteConfigFromUI() {
 
   await TrailDB.setSetting('route_config', state.routeConfig);
   renderRouteSetup();
+  populateStationDropdowns();
+  renderMarshalLinkGenerator();
+  renderParticipantCards();
+  updateQuickPuncherForStation();
+
+  // Kirim konfigurasi rute ke Google Sheets jika online
+  syncRouteConfigToCloud();
+
   showToast('Konfigurasi rute dan checkpoint berhasil disimpan!', 'success');
 }
 
@@ -2432,13 +2541,15 @@ function renderMarshalLinkGenerator() {
   const cps = state.routeConfig.checkpoints || [];
   const origin = window.location.origin + window.location.pathname.replace(/\/+$/, '');
   const backendParam = state.backendUrl ? `&backend=${encodeURIComponent(state.backendUrl)}` : '';
+  const routeParam = serializeRouteForUrl(state.routeConfig);
+  const routeQuery = routeParam ? `&route=${encodeURIComponent(routeParam)}` : '';
 
   container.innerHTML = cps.map((cp, idx) => {
     let icon = '⛰️';
     if (idx === 0) icon = '🚩';
     else if (idx === cps.length - 1) icon = '🏁';
 
-    const link = `${origin}?station=${encodeURIComponent(cp.name)}&role=marshal${backendParam}`;
+    const link = `${origin}?station=${encodeURIComponent(cp.name)}&role=marshal${backendParam}${routeQuery}`;
 
     const waMsg = encodeURIComponent(
       `Halo Petugas Pos,\nBerikut link akses aplikasi TrailTimer untuk pos tugas Anda:\n\n` +
@@ -2939,3 +3050,6 @@ window.removeCheckpointRow = removeCheckpointRow;
 window.copyToClipboard = copyToClipboard;
 window.resolveCheckpointMatch = resolveCheckpointMatch;
 window.isDeviceStationSpecific = isDeviceStationSpecific;
+window.serializeRouteForUrl = serializeRouteForUrl;
+window.parseRouteFromUrlParam = parseRouteFromUrlParam;
+window.syncRouteConfigToCloud = syncRouteConfigToCloud;

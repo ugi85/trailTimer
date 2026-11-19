@@ -213,9 +213,11 @@ function doGet(e) {
 
     var lastRow = sheetPeserta.getLastRow();
     if (lastRow <= 1) {
+      var routeConfig = getRouteConfigFromSheet(ss);
       return ContentService.createTextOutput(JSON.stringify({
         status: 'success',
-        participants: []
+        participants: [],
+        route_config: routeConfig
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -312,11 +314,13 @@ function doGet(e) {
       });
     }
 
+    var routeConfig = getRouteConfigFromSheet(ss);
     return ContentService.createTextOutput(JSON.stringify({
       status: 'success',
       count: list.length,
       isShiftedPaste: isShiftedPaste,
-      participants: list
+      participants: list,
+      route_config: routeConfig
     })).setMimeType(ContentService.MimeType.JSON);
   }
 
@@ -365,6 +369,14 @@ function doPost(e) {
         status: 'success',
         message: 'Berhasil menyimpan ' + count + ' data log waktu.',
         synced_count: count,
+        server_timestamp: new Date().toISOString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'save_route_config' && data.route) {
+      saveRouteConfigToSheet(ss, data.route);
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'success',
+        message: 'Konfigurasi rute berhasil disimpan di Google Sheets!',
+        route: data.route,
         server_timestamp: new Date().toISOString()
       })).setMimeType(ContentService.MimeType.JSON);
     } else {
@@ -662,4 +674,70 @@ function formatElapsedGAS(ms) {
 
   function pad(n) { return (n < 10 ? '0' : '') + n; }
   return pad(hours) + ':' + pad(minutes) + ':' + pad(seconds);
+}
+
+// ==========================================
+// 8. RUTE & CHECKPOINT SYNC HELPER
+// ==========================================
+function saveRouteConfigToSheet(ss, routeObj) {
+  if (!routeObj || !Array.isArray(routeObj.checkpoints) || routeObj.checkpoints.length === 0) return;
+  var sheetRute = ss.getSheetByName('Rute');
+  if (!sheetRute) {
+    sheetRute = ss.insertSheet('Rute');
+  } else {
+    sheetRute.clearContents();
+  }
+
+  var headers = ['No.', 'ID Pos', 'Nama Checkpoint / Pos', 'Jarak Segmen (KM)', 'Jarak Kumulatif (KM)'];
+  var rows = [headers];
+
+  var cps = routeObj.checkpoints;
+  for (var i = 0; i < cps.length; i++) {
+    var c = cps[i];
+    rows.push([
+      i + 1,
+      c.id || (i === 0 ? 'start' : (i === cps.length - 1 ? 'finish' : ('cp_' + i))),
+      c.name || ('Pos ' + i),
+      c.distFromPrevKm || 0,
+      c.cumulativeKm || 0
+    ]);
+  }
+
+  sheetRute.getRange(1, 1, rows.length, headers.length).setValues(rows);
+  sheetRute.getRange(1, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setBackground('#1e293b')
+    .setFontColor('#ffffff')
+    .setHorizontalAlignment('center');
+  sheetRute.setFrozenRows(1);
+  sheetRute.getRange('A:A').setNumberFormat('0');
+  sheetRute.getRange('D:E').setNumberFormat('0.00');
+}
+
+function getRouteConfigFromSheet(ss) {
+  var sheetRute = ss.getSheetByName('Rute');
+  if (!sheetRute || sheetRute.getLastRow() < 2) return null;
+  var data = sheetRute.getRange(2, 1, sheetRute.getLastRow() - 1, 5).getValues();
+  var checkpoints = [];
+  var totalDist = 0;
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var id = String(row[1] || '').trim() || ('cp_' + i);
+    var name = String(row[2] || '').trim();
+    if (!name) continue;
+    var dist = parseFloat(row[3]) || 0;
+    var cum = parseFloat(row[4]) || 0;
+    totalDist = Math.max(totalDist, cum);
+    checkpoints.push({
+      id: id,
+      name: name,
+      distFromPrevKm: dist,
+      cumulativeKm: cum
+    });
+  }
+  if (checkpoints.length === 0) return null;
+  return {
+    checkpoints: checkpoints,
+    totalDistanceKm: totalDist
+  };
 }

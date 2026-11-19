@@ -193,6 +193,20 @@ class TrailSync {
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const data = await response.json();
+
+      // Sinkronkan konfigurasi rute dari Google Sheets jika tersedia
+      if (data && data.route_config && Array.isArray(data.route_config.checkpoints) && data.route_config.checkpoints.length > 0) {
+        if (typeof state !== 'undefined' && state) {
+          state.routeConfig = data.route_config;
+        }
+        await TrailDB.setSetting('route_config', data.route_config);
+        if (typeof populateStationDropdowns === 'function') populateStationDropdowns();
+        if (typeof renderRouteSetup === 'function') renderRouteSetup();
+        if (typeof renderMarshalLinkGenerator === 'function') renderMarshalLinkGenerator();
+        if (typeof renderParticipantCards === 'function') renderParticipantCards();
+        if (typeof updateQuickPuncherForStation === 'function') updateQuickPuncherForStation();
+        console.log('[TrailSync] Konfigurasi rute berhasil disinkronkan dari Google Sheets:', data.route_config);
+      }
       if (data && Array.isArray(data.participants) && data.participants.length > 0) {
         // Smart Merge: Sinkronkan startTime dan status resmi dari server ke seluruh device
         const localList = await TrailDB.getAllParticipants();
