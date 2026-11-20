@@ -173,6 +173,41 @@ function parseStartTimestamp(val) {
 }
 
 /**
+ * Smart Parser untuk Total Waktu Tempuh & Durasi Split:
+ * Mengubah string "5:45:17", "02:03:08", "00:14:08", Date object, atau time fraction menjadi Milidetik (ms)
+ */
+function parseDurationToMs(val) {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'number') {
+    if (val > 100000000000) return null; // Epoch timestamp, bukan durasi
+    if (val > 1000) return Math.round(val);
+    return Math.round(val * 86400 * 1000); // Format serial hari Sheets/Excel
+  }
+  if (val instanceof Date) {
+    var h = val.getHours();
+    var m = val.getMinutes();
+    var s = val.getSeconds();
+    var ms = val.getMilliseconds();
+    return (h * 3600 + m * 60 + s) * 1000 + ms;
+  }
+  var str = String(val).trim();
+  if (!str || str === '-' || str === '--:--:--') return null;
+
+  var parts = str.split(':');
+  if (parts.length === 3) {
+    var hrs = parseFloat(parts[0]) || 0;
+    var mins = parseFloat(parts[1]) || 0;
+    var secs = parseFloat(parts[2]) || 0;
+    return Math.round((hrs * 3600 + mins * 60 + secs) * 1000);
+  } else if (parts.length === 2) {
+    var mins = parseFloat(parts[0]) || 0;
+    var secs = parseFloat(parts[1]) || 0;
+    return Math.round((mins * 60 + secs) * 1000);
+  }
+  return null;
+}
+
+/**
  * Mengambil peta waktu start pertama untuk setiap BIB dari sheet Timing_Logs
  */
 function getStartLogsMap(sheetLogs) {
@@ -194,6 +229,138 @@ function getStartLogsMap(sheetLogs) {
   return map;
 }
 
+/**
+ * Ekstraksi lengkap riwayat log (Start, CP splits, dan Finish) dari sheet Timing_Logs
+ */
+function getTimingLogsDetailsMap(sheetLogs, routeConfig) {
+  var result = {
+    startLogsMap: {},
+    splitsMap: {},
+    finishMap: {}
+  };
+  if (!sheetLogs || sheetLogs.getLastRow() <= 1) return result;
+
+  var numRows = sheetLogs.getLastRow() - 1;
+  var numCols = Math.min(15, sheetLogs.getLastColumn());
+  var data = sheetLogs.getRange(2, 1, numRows, numCols).getValues();
+  var cps = (routeConfig && Array.isArray(routeConfig.checkpoints)) ? routeConfig.checkpoints : [];
+
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var bib = String(row[5] || '').trim();
+    if (!bib) continue;
+
+    var action = String(row[8] || '').trim().toUpperCase();
+    var cpName = String(row[9] || '').trim();
+    var rawDeviceTs = row[2];
+    var rawServerTs = row[1];
+    var ts = parseStartTimestamp(rawDeviceTs) || parseStartTimestamp(rawServerTs) || Date.now();
+
+    var splitMs = parseDurationToMs(row[10]);
+    var splitFormatted = String(row[10] || '-').trim();
+    var elapsedMs = parseDurationToMs(row[11]);
+    var paceFormatted = String(row[12] || '').trim();
+    var speedFormatted = String(row[13] || '').trim();
+
+    if (action === 'START' || action === 'MASS_START') {
+      if (!result.startLogsMap[bib]) {
+        result.startLogsMap[bib] = ts;
+      }
+    } else if (action === 'CP' || action === 'SPLIT') {
+      if (!result.splitsMap[bib]) result.splitsMap[bib] = [];
+
+      var cpIdx = -1;
+      if (cps.length > 0) {
+        for (var c = 0; c < cps.length; c++) {
+          if (cps[c].name.toLowerCase() === cpName.toLowerCase()) {
+            cpIdx = c;
+            break;
+          }
+        }
+      }
+      if (cpIdx === -1) {
+        var numMatch = cpName.match(/\d+/);
+        cpIdx = numMatch ? parseInt(numMatch[0], 10) : (result.splitsMap[bib].length + 1);
+      }
+
+      var splitItem = {
+        cpIndex: cpIdx,
+        cpName: cpName || ('CP ' + cpIdx),
+        timestamp: ts,
+        splitMs: splitMs || 0,
+        splitFormatted: splitFormatted,
+        cumulativeMs: elapsedMs || 0,
+        paceFormatted: paceFormatted,
+        speedFormatted: speedFormatted
+      };
+
+      var existingIdx = -1;
+      for (var s = 0; s < result.splitsMap[bib].length; s++) {
+        if (result.splitsMap[bib][s].cpIndex === cpIdx || result.splitsMap[bib][s].cpName.toLowerCase() === cpName.toLowerCase()) {
+          existingIdx = s;
+          break;
+        }
+      }
+      if (existingIdx >= 0) {
+        result.splitsMap[bib][existingIdx] = splitItem;
+      } else {
+        result.splitsMap[bib].push(splitItem);
+      }
+
+    } else if (action === 'FINISH' || action === 'MASS_FINISH') {
+      result.finishMap[bib] = {
+        finishTime: ts,
+        totalMs: elapsedMs,
+        pace: paceFormatted,
+        speed: speedFormatted,
+        lastStation: cpName || 'Finish'
+      };
+
+      if (!result.splitsMap[bib]) result.splitsMap[bib] = [];
+      var finishCpIdx = cps.length > 0 ? (cps.length - 1) : 999;
+      var finishSplitItem = {
+        cpIndex: finishCpIdx,
+        cpName: cpName || 'Finish',
+        timestamp: ts,
+        splitMs: splitMs || elapsedMs || 0,
+        splitFormatted: splitFormatted,
+        cumulativeMs: elapsedMs || 0,
+        paceFormatted: paceFormatted,
+        speedFormatted: speedFormatted
+      };
+
+      var existingFinishIdx = -1;
+      for (var f = 0; f < result.splitsMap[bib].length; f++) {
+        if (result.splitsMap[bib][f].cpIndex === finishCpIdx || result.splitsMap[bib][f].cpName.toLowerCase() === (cpName || 'finish').toLowerCase()) {
+          existingFinishIdx = f;
+          break;
+        }
+      }
+      if (existingFinishIdx >= 0) {
+        result.splitsMap[bib][existingFinishIdx] = finishSplitItem;
+      } else {
+        result.splitsMap[bib].push(finishSplitItem);
+      }
+    } else if (action === 'UNDO') {
+      if (result.finishMap[bib]) {
+        delete result.finishMap[bib];
+      }
+      if (result.splitsMap[bib] && result.splitsMap[bib].length > 0) {
+        result.splitsMap[bib].pop();
+      }
+    }
+  }
+
+  // Urutkan splits berdasarkan cpIndex
+  for (var b in result.splitsMap) {
+    result.splitsMap[b].sort(function(a, b) {
+      return a.cpIndex - b.cpIndex;
+    });
+  }
+
+  return result;
+}
+
 // ==========================================
 // 2. HTTP GET: CLOUD PULL DATA PESERTA
 // ==========================================
@@ -204,16 +371,9 @@ function doGet(e) {
   // Aksi untuk menarik data peserta dari Google Sheets ke HP Panitia
   if (action === 'get_participants') {
     var sheetPeserta = ss.getSheetByName('Peserta');
-    if (!sheetPeserta) {
-      return ContentService.createTextOutput(JSON.stringify({
-        status: 'success',
-        participants: []
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
+    var routeConfig = getRouteConfigFromSheet(ss);
 
-    var lastRow = sheetPeserta.getLastRow();
-    if (lastRow <= 1) {
-      var routeConfig = getRouteConfigFromSheet(ss);
+    if (!sheetPeserta) {
       return ContentService.createTextOutput(JSON.stringify({
         status: 'success',
         participants: [],
@@ -221,9 +381,21 @@ function doGet(e) {
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // Ambil log start untuk fallback jika startTimestamp di sheet Peserta belum tercatat atau rusak
+    var lastRow = sheetPeserta.getLastRow();
+    if (lastRow <= 1) {
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'success',
+        participants: [],
+        route_config: routeConfig
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Ambil detail log start, splits, dan finish dari sheet Timing_Logs
     var sheetLogs = ss.getSheetByName('Timing_Logs');
-    var startLogsMap = getStartLogsMap(sheetLogs);
+    var logsDetails = getTimingLogsDetailsMap(sheetLogs, routeConfig);
+    var startLogsMap = logsDetails.startLogsMap;
+    var splitsMap = logsDetails.splitsMap;
+    var finishMap = logsDetails.finishMap;
 
     // Baca data dari baris 2, mulai kolom 1 (Kolom A) sampai kolom 13
     var numCols = Math.min(13, Math.max(5, sheetPeserta.getLastColumn()));
@@ -247,6 +419,7 @@ function doGet(e) {
     for (var i = 0; i < allData.length; i++) {
       var row = allData[i];
       var bib, name, category, team, status = 'dns', officialStartTime = null;
+      var rawLastCp = '', rawLastSplit = '', rawTotalTime = '', rawPace = '', rawSpeed = '';
 
       if (isShiftedPaste) {
         bib = String(row[0] !== null && row[0] !== undefined ? row[0] : '').trim();
@@ -257,6 +430,13 @@ function doGet(e) {
         if (rawStatusShifted === 'finish' || rawStatusShifted === 'finished') status = 'finished';
         else if (rawStatusShifted === 'berlari' || rawStatusShifted === 'running') status = 'running';
         else if (rawStatusShifted === 'dnf') status = 'dnf';
+
+        rawLastCp = row[5];
+        rawLastSplit = row[6];
+        rawTotalTime = row[7];
+        rawPace = row[8];
+        rawSpeed = row[9];
+        officialStartTime = parseStartTimestamp(row[10] || row[9] || row[8]);
       } else {
         bib = String(row[1] !== null && row[1] !== undefined ? row[1] : '').trim();
         name = String(row[2] || '').trim();
@@ -272,6 +452,12 @@ function doGet(e) {
         if (rawStatus === 'finish' || rawStatus === 'finished') status = 'finished';
         else if (rawStatus === 'berlari' || rawStatus === 'running') status = 'running';
         else if (rawStatus === 'dnf') status = 'dnf';
+
+        rawLastCp = row[6];
+        rawLastSplit = row[7];
+        rawTotalTime = row[8];
+        rawPace = row[9];
+        rawSpeed = row[10];
 
         // Baca Start Timestamp cerdas dari Kolom L (index 11)
         officialStartTime = parseStartTimestamp(row[11] || row[10] || row[9]);
@@ -300,6 +486,51 @@ function doGet(e) {
         }
       }
 
+      // Parse Total Waktu Tempuh, Pace, Speed, dan Pos Terakhir
+      var totalMs = parseDurationToMs(rawTotalTime);
+      var avgPace = String(rawPace || '').trim();
+      var avgSpeed = String(rawSpeed || '').trim();
+      var lastCp = String(rawLastCp || '').trim();
+
+      // Sinkronkan dengan log finish jika di sheet Peserta belum lengkap
+      if (finishMap[bib]) {
+        if ((totalMs === null || totalMs === undefined) && finishMap[bib].totalMs) {
+          totalMs = finishMap[bib].totalMs;
+        }
+        if (!avgPace && finishMap[bib].pace) avgPace = finishMap[bib].pace;
+        if (!avgSpeed && finishMap[bib].speed) avgSpeed = finishMap[bib].speed;
+        if (!lastCp && finishMap[bib].lastStation) lastCp = finishMap[bib].lastStation;
+      }
+
+      // Hitung finishTime secara presisi
+      var finishTime = null;
+      if (status === 'finished') {
+        if (officialStartTime && totalMs) {
+          finishTime = officialStartTime + totalMs;
+        } else if (finishMap[bib] && finishMap[bib].finishTime) {
+          finishTime = finishMap[bib].finishTime;
+        } else {
+          finishTime = Date.now();
+        }
+      }
+
+      // Ambil splits pos checkpoint
+      var participantSplits = (splitsMap[bib] && splitsMap[bib].length > 0) ? splitsMap[bib] : [];
+      if (participantSplits.length === 0 && status === 'finished' && totalMs) {
+        var finishCpIdx = (routeConfig && routeConfig.checkpoints) ? (routeConfig.checkpoints.length - 1) : 999;
+        var finishCpName = (routeConfig && routeConfig.checkpoints && routeConfig.checkpoints[finishCpIdx]) ? routeConfig.checkpoints[finishCpIdx].name : (lastCp || 'Finish');
+        participantSplits = [{
+          cpIndex: finishCpIdx,
+          cpName: finishCpName,
+          timestamp: finishTime,
+          splitMs: totalMs,
+          splitFormatted: formatElapsedGAS(totalMs),
+          cumulativeMs: totalMs,
+          paceFormatted: avgPace || '-',
+          speedFormatted: avgSpeed || '-'
+        }];
+      }
+
       list.push({
         bib: bib,
         name: name || ('Peserta ' + bib),
@@ -307,14 +538,16 @@ function doGet(e) {
         team: team || '',
         status: status,
         startTime: officialStartTime,
-        splits: [],
-        finishTime: (status === 'finished') ? Date.now() : null,
-        totalMs: null,
+        splits: participantSplits,
+        finishTime: finishTime,
+        totalMs: totalMs,
+        avgPace: avgPace,
+        avgSpeed: avgSpeed,
+        lastCp: lastCp || (status === 'finished' ? 'Finish' : (status === 'running' ? 'Start' : '')),
         history: []
       });
     }
 
-    var routeConfig = getRouteConfigFromSheet(ss);
     return ContentService.createTextOutput(JSON.stringify({
       status: 'success',
       count: list.length,
@@ -327,7 +560,7 @@ function doGet(e) {
   return ContentService.createTextOutput(JSON.stringify({
     status: 'success',
     app: 'TrailTimer Google Apps Script Backend',
-    version: '1.3',
+    version: '1.4',
     timestamp: new Date().toISOString(),
     message: 'Backend siap menerima dan mengirim data catatan waktu lomba lari!'
   })).setMimeType(ContentService.MimeType.JSON);

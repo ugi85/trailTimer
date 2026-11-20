@@ -251,7 +251,7 @@ function initSyncEngine() {
     onSyncComplete: async ({ success, count, pullCount, isManual }) => {
       updateSyncBadge();
       renderSyncQueue();
-      if (pullCount > 0) {
+      if (pullCount > 0 || count > 0) {
         await refreshParticipants();
       }
       if (success && (count > 0 || pullCount > 0)) {
@@ -644,12 +644,12 @@ function renderParticipantCards() {
     let timerDisplay = '--:--:--';
     if (p.status === 'running' && p.startTime) {
       timerDisplay = TrailTimer.formatElapsed(Date.now() - p.startTime);
-    } else if (p.status === 'finished' && p.totalMs) {
-      timerDisplay = TrailTimer.formatElapsed(p.totalMs);
+    } else if (p.status === 'finished' && (p.totalMs || (p.finishTime && p.startTime))) {
+      timerDisplay = TrailTimer.formatElapsed(p.totalMs || (p.finishTime - p.startTime));
     }
 
     // Last CP info
-    let lastCpName = 'Start';
+    let lastCpName = p.lastCp || (p.status === 'finished' ? 'Finish' : 'Start');
     let lastSplitTime = '-';
     let lastPace = '-';
     if (splits.length > 0) {
@@ -657,6 +657,10 @@ function renderParticipantCards() {
       lastCpName = lastSplit.cpName || `CP ${lastSplit.cpIndex}`;
       lastSplitTime = lastSplit.splitFormatted || TrailTimer.formatElapsed(lastSplit.splitMs);
       lastPace = lastSplit.paceFormatted || '-';
+    } else if (p.status === 'finished') {
+      lastCpName = p.lastCp || 'Finish';
+      if (p.totalMs) lastSplitTime = TrailTimer.formatElapsed(p.totalMs);
+      lastPace = p.avgPace || '-';
     } else if (p.status === 'running') {
       if (isStationSpecific) {
         lastCpName = alreadyAtCurrentStation ? currentStationName : `Menuju ${currentStationName}`;
@@ -2074,8 +2078,12 @@ function renderLeaderboard() {
     finishers = finishers.filter(p => p.category === selectedCat);
   }
 
-  // Sort by totalMs ascending
-  finishers.sort((a, b) => (a.totalMs || Infinity) - (b.totalMs || Infinity));
+  // Sort by totalMs ascending (with fallback to finishTime - startTime)
+  finishers.sort((a, b) => {
+    const timeA = (a.totalMs !== null && a.totalMs !== undefined) ? a.totalMs : ((a.finishTime && a.startTime) ? (a.finishTime - a.startTime) : Infinity);
+    const timeB = (b.totalMs !== null && b.totalMs !== undefined) ? b.totalMs : ((b.finishTime && b.startTime) ? (b.finishTime - b.startTime) : Infinity);
+    return timeA - timeB;
+  });
 
   if (finishers.length === 0) {
     tbody.innerHTML = '';
@@ -2111,10 +2119,12 @@ function renderLeaderboard() {
     else if (rank === 2) rankBadge = `<span class="rank-badge rank-2" title="Juara 2">2</span>`;
     else if (rank === 3) rankBadge = `<span class="rank-badge rank-3" title="Juara 3">3</span>`;
 
+    const totalDurationMs = (p.totalMs !== null && p.totalMs !== undefined) ? p.totalMs : ((p.finishTime && p.startTime) ? (p.finishTime - p.startTime) : null);
+
     // Checkpoint split times
     const cpSplitsHtml = checkpoints.slice(1, -1).map((cp, cpIdx) => {
-      const sp = (p.splits || []).find(s => s.cpIndex === (cpIdx + 1));
-      return `<td>${sp ? sp.splitFormatted : '-'}</td>`;
+      const sp = (p.splits || []).find(s => s.cpIndex === (cpIdx + 1) || (s.cpName && s.cpName.toLowerCase() === cp.name.toLowerCase()));
+      return `<td>${sp ? (sp.splitFormatted || TrailTimer.formatElapsed(sp.splitMs)) : '-'}</td>`;
     }).join('');
 
     return `
@@ -2124,7 +2134,7 @@ function renderLeaderboard() {
         <td><strong>${p.name}</strong></td>
         <td><span class="runner-category">${p.category}</span></td>
         <td style="font-family: var(--font-mono); font-weight: 800; color: var(--primary-light); font-size: 1.05rem;">
-          ${TrailTimer.formatElapsed(p.totalMs)}
+          ${TrailTimer.formatElapsed(totalDurationMs)}
         </td>
         ${cpSplitsHtml}
         <td style="font-family: var(--font-mono);">${p.avgPace || '-'}</td>

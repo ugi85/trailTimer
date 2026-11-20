@@ -226,13 +226,22 @@ class TrailSync {
               lp.splits = [];
               lp.avgPace = null;
               lp.avgSpeed = null;
+              lp.lastCp = null;
               lp.history = [];
             } else {
               // Status resmi server (running atau finished)
               if (sp.startTime) lp.startTime = sp.startTime;
               if (sp.status) lp.status = sp.status;
               if (sp.finishTime) lp.finishTime = sp.finishTime;
-              if (sp.totalMs) lp.totalMs = sp.totalMs;
+              if (sp.totalMs !== undefined && sp.totalMs !== null) lp.totalMs = sp.totalMs;
+              if (sp.avgPace) lp.avgPace = sp.avgPace;
+              if (sp.avgSpeed) lp.avgSpeed = sp.avgSpeed;
+              if (sp.lastCp) lp.lastCp = sp.lastCp;
+              if (Array.isArray(sp.splits) && sp.splits.length > 0) {
+                if (!lp.splits || lp.splits.length === 0 || sp.splits.length >= lp.splits.length) {
+                  lp.splits = sp.splits;
+                }
+              }
             }
             lp.name = sp.name || lp.name;
             lp.category = sp.category || lp.category;
@@ -447,15 +456,18 @@ class TrailSync {
     filtered.sort((a, b) => (a.totalMs || Infinity) - (b.totalMs || Infinity));
 
     const headers = ['Peringkat', 'BIB', 'Nama', 'Kategori', 'Total_Waktu', 'Avg_Pace', 'Avg_Speed'];
-    const rows = filtered.map((p, idx) => [
-      idx + 1,
-      `"${p.bib}"`,
-      `"${(p.name || '').replace(/"/g, '""')}"`,
-      `"${(p.category || '').replace(/"/g, '""')}"`,
-      TrailTimer.formatElapsed(p.totalMs),
-      p.avgPace || '-',
-      p.avgSpeed || '-'
-    ]);
+    const rows = filtered.map((p, idx) => {
+      const totalDur = p.totalMs || (p.finishTime && p.startTime ? p.finishTime - p.startTime : null);
+      return [
+        idx + 1,
+        `"${p.bib}"`,
+        `"${(p.name || '').replace(/"/g, '""')}"`,
+        `"${(p.category || '').replace(/"/g, '""')}"`,
+        TrailTimer.formatElapsed(totalDur),
+        p.avgPace || '-',
+        p.avgSpeed || '-'
+      ];
+    });
 
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
     const catClean = category.replace(/[^a-zA-Z0-9]/g, '_');
