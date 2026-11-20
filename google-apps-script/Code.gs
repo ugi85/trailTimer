@@ -208,6 +208,24 @@ function parseDurationToMs(val) {
 }
 
 /**
+ * Membersihkan tampilan durasi split / waktu agar bebas dari teks tanggal (1899) dan embel-embel GMT / Timezone
+ */
+function cleanDurationGAS(val) {
+  if (val === null || val === undefined) return '-';
+  var ms = parseDurationToMs(val);
+  if (ms !== null && ms !== undefined) {
+    return formatElapsedGAS(ms);
+  }
+  var s = String(val).trim();
+  if (!s || s === '-') return '-';
+  var match = s.match(/(\d{1,2}:\d{2}:\d{2})/);
+  if (match) return match[1];
+  var shortMatch = s.match(/(\d{1,2}:\d{2})/);
+  if (shortMatch) return shortMatch[1];
+  return s.replace(/GMT.*$/i, '').trim();
+}
+
+/**
  * Mengambil peta waktu start pertama untuk setiap BIB dari sheet Timing_Logs
  */
 function getStartLogsMap(sheetLogs) {
@@ -257,7 +275,7 @@ function getTimingLogsDetailsMap(sheetLogs, routeConfig) {
     var ts = parseStartTimestamp(rawDeviceTs) || parseStartTimestamp(rawServerTs) || Date.now();
 
     var splitMs = parseDurationToMs(row[10]);
-    var splitFormatted = String(row[10] || '-').trim();
+    var splitFormatted = cleanDurationGAS(row[10]);
     var elapsedMs = parseDurationToMs(row[11]);
     var paceFormatted = String(row[12] || '').trim();
     var speedFormatted = String(row[13] || '').trim();
@@ -323,7 +341,7 @@ function getTimingLogsDetailsMap(sheetLogs, routeConfig) {
         cpName: cpName || 'Finish',
         timestamp: ts,
         splitMs: splitMs || elapsedMs || 0,
-        splitFormatted: splitFormatted,
+        splitFormatted: (splitFormatted && splitFormatted !== '-') ? splitFormatted : formatElapsedGAS(elapsedMs || splitMs),
         cumulativeMs: elapsedMs || 0,
         paceFormatted: paceFormatted,
         speedFormatted: speedFormatted
@@ -432,7 +450,7 @@ function doGet(e) {
         else if (rawStatusShifted === 'dnf') status = 'dnf';
 
         rawLastCp = row[5];
-        rawLastSplit = row[6];
+        rawLastSplit = cleanDurationGAS(row[6]);
         rawTotalTime = row[7];
         rawPace = row[8];
         rawSpeed = row[9];
@@ -454,7 +472,7 @@ function doGet(e) {
         else if (rawStatus === 'dnf') status = 'dnf';
 
         rawLastCp = row[6];
-        rawLastSplit = row[7];
+        rawLastSplit = cleanDurationGAS(row[7]);
         rawTotalTime = row[8];
         rawPace = row[9];
         rawSpeed = row[10];

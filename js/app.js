@@ -655,7 +655,7 @@ function renderParticipantCards() {
     if (splits.length > 0) {
       const lastSplit = splits[splits.length - 1];
       lastCpName = lastSplit.cpName || `CP ${lastSplit.cpIndex}`;
-      lastSplitTime = lastSplit.splitFormatted || TrailTimer.formatElapsed(lastSplit.splitMs);
+      lastSplitTime = TrailTimer.cleanTimeDisplay(lastSplit.splitFormatted, lastSplit.splitMs);
       lastPace = lastSplit.paceFormatted || '-';
     } else if (p.status === 'finished') {
       lastCpName = p.lastCp || 'Finish';
@@ -2124,7 +2124,7 @@ function renderLeaderboard() {
     // Checkpoint split times
     const cpSplitsHtml = checkpoints.slice(1, -1).map((cp, cpIdx) => {
       const sp = (p.splits || []).find(s => s.cpIndex === (cpIdx + 1) || (s.cpName && s.cpName.toLowerCase() === cp.name.toLowerCase()));
-      return `<td>${sp ? (sp.splitFormatted || TrailTimer.formatElapsed(sp.splitMs)) : '-'}</td>`;
+      return `<td>${sp ? TrailTimer.cleanTimeDisplay(sp.splitFormatted, sp.splitMs) : '-'}</td>`;
     }).join('');
 
     return `

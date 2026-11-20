@@ -37,6 +37,24 @@ class TrailTimer {
   }
 
   /**
+   * Bersihkan tampilan waktu / split agar murni HH:MM:SS atau MM:SS tanpa tanggal 1899 atau teks GMT / Timezone
+   */
+  static cleanTimeDisplay(val, fallbackMs) {
+    if (fallbackMs !== null && fallbackMs !== undefined && !isNaN(fallbackMs) && fallbackMs >= 0) {
+      return this.formatElapsed(fallbackMs);
+    }
+    if (val === null || val === undefined) return '-';
+    if (typeof val === 'number') return this.formatElapsed(val);
+    const s = String(val).trim();
+    if (!s || s === '-' || s === '--:--:--') return '-';
+    const match = s.match(/(\d{1,2}:\d{2}:\d{2})/);
+    if (match) return match[1];
+    const shortMatch = s.match(/(\d{1,2}:\d{2})/);
+    if (shortMatch) return shortMatch[1];
+    return s.replace(/GMT.*$/i, '').trim();
+  }
+
+  /**
    * Format seconds-per-km to MM:SS /km (Pace)
    */
   static formatPace(paceSecPerKm) {
