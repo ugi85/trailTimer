@@ -532,6 +532,21 @@ function doGet(e) {
         }
       }
 
+      // Rekonsiliasi cerdas: Jika pos finish offline sejak H-1, hitung totalMs dari finishTime - officialStartTime
+      if (status === 'finished' && (!totalMs || totalMs === 0) && officialStartTime && finishTime && finishTime > officialStartTime) {
+        totalMs = finishTime - officialStartTime;
+        if ((!avgPace || avgPace === '-') && routeConfig && routeConfig.totalDistanceKm) {
+          var hCalc = totalMs / 3600000;
+          var sCalc = totalMs / 1000;
+          avgSpeed = (routeConfig.totalDistanceKm / hCalc).toFixed(1) + ' km/h';
+          var paceSecsCalc = sCalc / routeConfig.totalDistanceKm;
+          var pMinsCalc = Math.floor(paceSecsCalc / 60);
+          var pSecsCalc = Math.floor(paceSecsCalc % 60);
+          var padHelper = function(n) { return (n < 10 ? '0' : '') + n; };
+          avgPace = padHelper(pMinsCalc) + ':' + padHelper(pSecsCalc) + ' /km';
+        }
+      }
+
       // Ambil splits pos checkpoint
       var participantSplits = (splitsMap[bib] && splitsMap[bib].length > 0) ? splitsMap[bib] : [];
       if (participantSplits.length === 0 && status === 'finished' && totalMs) {
@@ -867,6 +882,20 @@ function updatePesertaSheet(sheet, updates) {
       formattedStart,
       u.updatedAt
     ];
+
+    // Rekonsiliasi otomatis jika totalTime kosong padahal status Finish (misal pos finish offline sejak H-1):
+    if (u.status === 'Finish' && (!u.totalTime || u.totalTime === '-' || u.totalTime === '0:00:00')) {
+      var sTs = parsedNew || (startLogsMap && startLogsMap[bib]);
+      if (!sTs && bibMap[bib]) {
+        var existingStart = sheet.getRange(bibMap[bib], 12).getValue();
+        sTs = parseStartTimestamp(existingStart);
+      }
+      var fTs = (u.updatedAt instanceof Date) ? u.updatedAt.getTime() : Date.now();
+      if (sTs && fTs && fTs > sTs) {
+        var autoTotalMs = fTs - sTs;
+        rowValues[7] = formatElapsedGAS(autoTotalMs);
+      }
+    }
 
     if (bibMap[bib]) {
       var rowIdx = bibMap[bib];

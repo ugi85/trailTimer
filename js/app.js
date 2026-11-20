@@ -715,8 +715,12 @@ function renderParticipantCards() {
           `;
         } else if (p.status === 'dns') {
           actionButtonsHtml = `
-            <button class="btn btn-start btn-sm" onclick="handleStartRunner('${p.bib}')">
-              MULAI / START
+            <button class="btn btn-finish btn-sm" onclick="handleFinishRunner('${p.bib}')" title="Catat Finish (Posisi Offline H-1)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path><line x1="4" y1="22" x2="4" y2="15"></line></svg>
+              FINISH / STOP
+            </button>
+            <button class="btn btn-danger btn-sm" onclick="handleDnfRunner('${p.bib}')" title="Tandai DNF">
+              DNF
             </button>
           `;
         }
@@ -1095,7 +1099,7 @@ async function handlePunchSpecificCheckpoint(bib, stationName, customTimestamp =
   }
 }
 
-// 3. Finish Runner
+// 3. Finish Runner (Mendukung pelari aktif maupun pencatatan pos finish offline H-1)
 async function handleFinishRunner(bib, customTimestamp = null) {
   const p = await TrailDB.getParticipant(bib);
   if (!p) {
@@ -1103,33 +1107,34 @@ async function handleFinishRunner(bib, customTimestamp = null) {
     return;
   }
 
-  if (p.status !== 'running') {
-    showToast(`Peserta BIB #${bib} tidak sedang berlari.`, 'info');
+  if (p.status === 'finished') {
+    showToast(`Peserta BIB #${bib} sudah selesai Finish.`, 'info');
     return;
   }
 
   const now = customTimestamp || Date.now();
   recordStateSnapshot(p);
 
-  const totalMs = Math.max(0, now - p.startTime);
+  const hasStartTime = !!(p.startTime && p.status === 'running');
+  const totalMs = hasStartTime ? Math.max(0, now - p.startTime) : null;
   const totalDist = state.routeConfig.totalDistanceKm || 0;
-  const overall = TrailTimer.calculateOverall(totalMs, totalDist);
+  const overall = totalMs ? TrailTimer.calculateOverall(totalMs, totalDist) : null;
 
   // Check last segment split if applicable
   const checkpoints = state.routeConfig.checkpoints || [];
   const finishCp = checkpoints[checkpoints.length - 1] || { name: 'Finish Gate', distFromPrevKm: 0 };
   const prevTimestamp = (p.splits && p.splits.length > 0) ? p.splits[p.splits.length - 1].timestamp : p.startTime;
-  const lastSplitData = TrailTimer.calculateSplit(prevTimestamp, now, finishCp.distFromPrevKm || 0);
+  const lastSplitData = prevTimestamp ? TrailTimer.calculateSplit(prevTimestamp, now, finishCp.distFromPrevKm || 0) : null;
 
   const finishSplitRecord = {
     cpIndex: checkpoints.length - 1,
     cpName: finishCp.name,
     timestamp: now,
-    splitMs: lastSplitData.splitMs,
-    splitFormatted: lastSplitData.splitFormatted,
-    cumulativeMs: totalMs,
-    paceFormatted: lastSplitData.paceFormatted,
-    speedFormatted: lastSplitData.speedFormatted
+    splitMs: lastSplitData ? lastSplitData.splitMs : 0,
+    splitFormatted: lastSplitData ? lastSplitData.splitFormatted : TrailTimer.formatTimeOfDay(now),
+    cumulativeMs: totalMs || 0,
+    paceFormatted: lastSplitData ? lastSplitData.paceFormatted : (overall ? overall.paceFormatted : '-'),
+    speedFormatted: lastSplitData ? lastSplitData.speedFormatted : (overall ? overall.speedFormatted : '-')
   };
 
   if (!p.splits) p.splits = [];
@@ -1138,12 +1143,13 @@ async function handleFinishRunner(bib, customTimestamp = null) {
   p.status = 'finished';
   p.finishTime = now;
   p.totalMs = totalMs;
-  p.avgPace = overall.paceFormatted;
-  p.avgSpeed = overall.speedFormatted;
+  p.avgPace = overall ? overall.paceFormatted : '-';
+  p.avgSpeed = overall ? overall.speedFormatted : '-';
+  p.lastCp = finishCp.name;
 
   await TrailDB.saveParticipant(p);
 
-  // Add timing log
+  // Add timing log (menyimpan stempel waktu perangkat yang presisi untuk rekonsiliasi cloud)
   await TrailDB.addTimingLog({
     bib: p.bib,
     participant_name: p.name,
@@ -1154,15 +1160,20 @@ async function handleFinishRunner(bib, customTimestamp = null) {
     checkpoint_name: finishCp.name,
     timestamp: now,
     device_timestamp: new Date(now).toISOString(),
-    elapsed_ms: totalMs,
-    split_ms: lastSplitData.splitMs,
-    pace: overall.paceFormatted,
-    speed: overall.speedFormatted
+    elapsed_ms: totalMs || 0,
+    split_ms: lastSplitData ? lastSplitData.splitMs : 0,
+    pace: overall ? overall.paceFormatted : '',
+    speed: overall ? overall.speedFormatted : ''
   });
 
   updateSyncBadge();
   await refreshParticipants();
-  showToast(`FINISH! BIB #${p.bib} ${p.name} - Total: ${overall.totalFormatted}`, 'success');
+
+  if (hasStartTime && overall) {
+    showToast(`🏁 FINISH! BIB #${p.bib} ${p.name} - Total: ${overall.totalFormatted}`, 'success');
+  } else {
+    showToast(`🏁 FINISH DICATAT! BIB #${p.bib} tiba jam ${TrailTimer.formatTimeOfDay(now)} (Waktu tempuh dihitung otomatis saat online)`, 'success');
+  }
 
   if (navigator.onLine && state.syncEngine) {
     state.syncEngine.syncNow();
@@ -1458,9 +1469,9 @@ async function handleMassActionOnTargets(targets, actionType, options = {}) {
     showToast(`📍 PUNCH CP: Berhasil mencatat ${eligible.length} pelari (${label}) tiba di ${targetName}!`, 'success');
 
   } else if (actionType === 'FINISH') {
-    const eligible = targets.filter(p => p.status === 'running');
+    const eligible = targets.filter(p => p.status === 'running' || p.status === 'dns');
     if (eligible.length === 0) {
-      showToast(`Tidak ada pelari berstatus 'Berlari' di ${label} untuk di-Finish.`, 'info');
+      showToast(`Tidak ada pelari di ${label} untuk di-Finish.`, 'info');
       return;
     }
 
