@@ -1,4 +1,4 @@
-const CACHE_NAME = 'trailtimer-v1.1.1';
+const CACHE_NAME = 'aagtimer-v1.2.0';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -8,8 +8,8 @@ const ASSETS_TO_CACHE = [
   './js/timer.js',
   './js/sync.js',
   './js/app.js',
-  './icons/icon.svg',
-  './icons/favicon.svg',
+  './icons/logo.png',
+  './icons/favicon.png',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];

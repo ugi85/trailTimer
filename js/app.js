@@ -2568,7 +2568,7 @@ function renderMarshalLinkGenerator() {
     const link = `${origin}?station=${encodeURIComponent(cp.name)}&role=marshal${backendParam}${routeQuery}`;
 
     const waMsg = encodeURIComponent(
-      `Halo Petugas Pos,\nBerikut link akses aplikasi TrailTimer untuk pos tugas Anda:\n\n` +
+      `Halo Petugas Pos,\nBerikut link akses aplikasi AagTimer untuk pos tugas Anda:\n\n` +
       `📍 *${cp.name}* (Jarak: ${cp.distFromPrevKm || 0} KM)\n` +
       `🔗 ${link}\n\n` +
       `*Petunjuk:* Buka link di browser HP Anda dan klik "Tambahkan ke Layar Utama" (Install PWA) saat di Basecamp. Sistem sudah otomatis terkunci untuk pos Anda!`

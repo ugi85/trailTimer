@@ -402,7 +402,7 @@ class TrailSync {
     ]);
 
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
-    this.downloadFile(csvContent, `TrailTimer_Logs_${this.getDateStamp()}.csv`, 'text/csv;charset=utf-8;');
+    this.downloadFile(csvContent, `AagTimer_Logs_${this.getDateStamp()}.csv`, 'text/csv;charset=utf-8;');
   }
 
   static async exportParticipantsCSV() {
@@ -444,7 +444,7 @@ class TrailSync {
     ]);
 
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
-    this.downloadFile(csvContent, `TrailTimer_Peserta_${this.getDateStamp()}.csv`, 'text/csv;charset=utf-8;');
+    this.downloadFile(csvContent, `AagTimer_Peserta_${this.getDateStamp()}.csv`, 'text/csv;charset=utf-8;');
   }
 
   static async exportLeaderboardCSV(category = 'Semua') {
@@ -471,13 +471,13 @@ class TrailSync {
 
     const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
     const catClean = category.replace(/[^a-zA-Z0-9]/g, '_');
-    this.downloadFile(csvContent, `TrailTimer_Klasemen_${catClean}_${this.getDateStamp()}.csv`, 'text/csv;charset=utf-8;');
+    this.downloadFile(csvContent, `AagTimer_Klasemen_${catClean}_${this.getDateStamp()}.csv`, 'text/csv;charset=utf-8;');
   }
 
   static async exportJSONBackup() {
     const backup = await TrailDB.exportFullBackup();
     const jsonString = JSON.stringify(backup, null, 2);
-    this.downloadFile(jsonString, `TrailTimer_Backup_Full_${this.getDateStamp()}.json`, 'application/json');
+    this.downloadFile(jsonString, `AagTimer_Backup_Full_${this.getDateStamp()}.json`, 'application/json');
   }
 
   static downloadFile(content, fileName, mimeType) {

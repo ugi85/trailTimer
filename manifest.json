@@ -1,7 +1,7 @@
 {
-  "name": "TrailTimer - Pencatatan Waktu Trail Running",
-  "short_name": "TrailTimer",
-  "description": "Aplikasi PWA Offline-First Pencatatan Waktu Lomba Lari & Trail Running Gunung",
+  "name": "AagTimer - Pencatatan Waktu Trail Running",
+  "short_name": "AagTimer",
+  "description": "Aplikasi PWA Offline-First Pencatatan Waktu Lomba Lari & Trail Running",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
@@ -28,9 +28,9 @@
       "purpose": "maskable"
     },
     {
-      "src": "./icons/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml"
+      "src": "./icons/logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
     }
   ]
 }

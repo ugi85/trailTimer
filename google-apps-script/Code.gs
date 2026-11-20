@@ -21,7 +21,7 @@
 function onOpen() {
   try {
     var ui = SpreadsheetApp.getUi();
-    ui.createMenu('🏃 TrailTimer')
+    ui.createMenu('🏃 AagTimer')
       .addItem('🛠️ Tampilkan & Perbaiki Header', 'perbaikiDanTampilkanHeader')
       .addItem('🔢 Rapikan Nomor & Kolom Tergeser', 'rapikanNomorDanFormat')
       .addToUi();
@@ -39,7 +39,7 @@ function perbaikiDanTampilkanHeader() {
   initSpreadsheetStructure(ss);
   
   try {
-    SpreadsheetApp.getActiveSpreadsheet().toast('Header dan format sheet berhasil diperbarui dan ditampilkan kembali!', 'TrailTimer', 5);
+    SpreadsheetApp.getActiveSpreadsheet().toast('Header dan format sheet berhasil diperbarui dan ditampilkan kembali!', 'AagTimer', 5);
   } catch (e) {}
 }
 
@@ -577,7 +577,7 @@ function doGet(e) {
 
   return ContentService.createTextOutput(JSON.stringify({
     status: 'success',
-    app: 'TrailTimer Google Apps Script Backend',
+    app: 'AagTimer Google Apps Script Backend',
     version: '1.4',
     timestamp: new Date().toISOString(),
     message: 'Backend siap menerima dan mengirim data catatan waktu lomba lari!'
